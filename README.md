@@ -101,11 +101,20 @@ All REST endpoints communicate via JSON using clean DTO projections, enforce `[A
 | `PUT` | `/api/customers/{id}` | Update customer record |
 | `DELETE` | `/api/customers/{id}` | Delete customer record |
 | `GET` | `/api/leads` | Search & list prospective leads |
+| `GET` | `/api/leads/{id}` | Retrieve individual lead by ID (with ownership check) |
 | `POST` | `/api/leads` | Create new prospect lead |
+| `PUT` | `/api/leads/{id}` | Update existing lead |
+| `DELETE` | `/api/leads/{id}` | Delete lead record |
 | `GET` | `/api/opportunities` | List sales opportunities |
+| `GET` | `/api/opportunities/{id}` | Retrieve individual opportunity |
 | `POST` | `/api/opportunities` | Create opportunity deal (validates amount > 0, probability 0-100) |
+| `PUT` | `/api/opportunities/{id}` | Update opportunity record |
+| `DELETE` | `/api/opportunities/{id}` | Delete opportunity record |
 | `GET` | `/api/followups` | Retrieve follow-up tasks |
+| `GET` | `/api/followups/{id}` | Retrieve individual follow-up |
 | `POST` | `/api/followups` | Schedule new follow-up (validates date >= today) |
+| `PUT` | `/api/followups/{id}` | Update follow-up task |
+| `DELETE` | `/api/followups/{id}` | Delete follow-up record |
 | `GET` | `/api/reports/pipeline` | Aggregate open pipeline volume and stage distribution |
 
 ---

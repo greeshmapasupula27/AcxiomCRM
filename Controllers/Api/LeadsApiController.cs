@@ -207,5 +207,87 @@ namespace AcxiomCRM.Controllers.Api
                 Data = dto
             });
         }
+
+        // PUT: api/leads/5
+        [HttpPut("{id}")]
+        public async Task<ActionResult<ApiResponse<LeadDto>>> UpdateLead(int id, [FromBody] LeadDto dto)
+        {
+            var user = await _userManager.GetUserAsync(User);
+            if (user == null) return Unauthorized();
+
+            if (!ModelState.IsValid)
+            {
+                var errors = ModelState.Values.SelectMany(v => v.Errors).Select(e => e.ErrorMessage).ToList();
+                return BadRequest(new ApiResponse<LeadDto> { Success = false, Message = "Validation failed.", Errors = errors });
+            }
+
+            var lead = await _context.Leads.FindAsync(id);
+            if (lead == null)
+            {
+                return NotFound(new ApiResponse<LeadDto> { Success = false, Message = $"Lead with ID {id} not found." });
+            }
+
+            if (!await _userScopeService.CanAccessRecordAsync(user, lead.AssignedTo))
+            {
+                return Forbid();
+            }
+
+            // Verify assignment permissions if changing owner
+            if (!string.IsNullOrEmpty(dto.AssignedTo) && dto.AssignedTo != lead.AssignedTo)
+            {
+                if (!await _userScopeService.CanAssignToUserAsync(user, dto.AssignedTo))
+                {
+                    return StatusCode(StatusCodes.Status403Forbidden, new ApiResponse<LeadDto>
+                    {
+                        Success = false,
+                        Message = "You do not have permission to reassign this lead to the selected user."
+                    });
+                }
+                lead.AssignedTo = dto.AssignedTo;
+            }
+
+            lead.LeadName = dto.LeadName;
+            lead.Email = dto.Email;
+            lead.Phone = dto.Phone;
+            lead.CompanyName = dto.CompanyName;
+            lead.Source = dto.Source;
+            lead.Status = dto.Status;
+            lead.Priority = dto.Priority;
+            lead.ExpectedValue = dto.ExpectedValue;
+            lead.Notes = dto.Notes;
+
+            await _context.SaveChangesAsync();
+
+            await _auditService.LogAsync(user.Id, "Update", "Lead", id.ToString(), null, dto.LeadName, "Success", "Updated via REST API", HttpContext.Connection.RemoteIpAddress?.ToString());
+
+            dto.LeadId = id;
+            return Ok(new ApiResponse<LeadDto> { Success = true, Message = "Lead updated successfully.", Data = dto });
+        }
+
+        // DELETE: api/leads/5
+        [HttpDelete("{id}")]
+        public async Task<ActionResult<ApiResponse<bool>>> DeleteLead(int id)
+        {
+            var user = await _userManager.GetUserAsync(User);
+            if (user == null) return Unauthorized();
+
+            var lead = await _context.Leads.FindAsync(id);
+            if (lead == null)
+            {
+                return NotFound(new ApiResponse<bool> { Success = false, Message = $"Lead with ID {id} not found." });
+            }
+
+            if (!await _userScopeService.CanAccessRecordAsync(user, lead.AssignedTo))
+            {
+                return Forbid();
+            }
+
+            _context.Leads.Remove(lead);
+            await _context.SaveChangesAsync();
+
+            await _auditService.LogAsync(user.Id, "Delete", "Lead", id.ToString(), lead.LeadName, null, "Success", "Deleted via REST API", HttpContext.Connection.RemoteIpAddress?.ToString());
+
+            return Ok(new ApiResponse<bool> { Success = true, Message = "Lead deleted successfully.", Data = true });
+        }
     }
 }

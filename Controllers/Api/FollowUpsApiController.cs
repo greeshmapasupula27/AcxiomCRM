@@ -204,6 +204,83 @@ namespace AcxiomCRM.Controllers.Api
                 Data = dto
             });
         }
+
+        // PUT: api/followups/5
+        [HttpPut("{id}")]
+        public async Task<ActionResult<ApiResponse<FollowUpDto>>> UpdateFollowUp(int id, [FromBody] FollowUpDto dto)
+        {
+            var user = await _userManager.GetUserAsync(User);
+            if (user == null) return Unauthorized();
+
+            if (!ModelState.IsValid)
+            {
+                var errors = ModelState.Values.SelectMany(v => v.Errors).Select(e => e.ErrorMessage).ToList();
+                return BadRequest(new ApiResponse<FollowUpDto> { Success = false, Message = "Validation failed.", Errors = errors });
+            }
+
+            var fu = await _context.FollowUps.FindAsync(id);
+            if (fu == null)
+            {
+                return NotFound(new ApiResponse<FollowUpDto> { Success = false, Message = $"Follow-up with ID {id} not found." });
+            }
+
+            if (!await _userScopeService.CanAccessRecordAsync(user, fu.AssignedTo))
+            {
+                return Forbid();
+            }
+
+            if (!string.IsNullOrEmpty(dto.AssignedTo) && dto.AssignedTo != fu.AssignedTo)
+            {
+                if (!await _userScopeService.CanAssignToUserAsync(user, dto.AssignedTo))
+                {
+                    return StatusCode(StatusCodes.Status403Forbidden, new ApiResponse<FollowUpDto>
+                    {
+                        Success = false,
+                        Message = "You do not have permission to reassign this follow-up to the selected user."
+                    });
+                }
+                fu.AssignedTo = dto.AssignedTo;
+            }
+
+            fu.FollowUpDate = dto.FollowUpDate;
+            fu.FollowUpType = dto.FollowUpType;
+            fu.Subject = dto.Subject;
+            fu.Remarks = dto.Remarks;
+            fu.Status = dto.Status;
+
+            await _context.SaveChangesAsync();
+
+            await _auditService.LogAsync(user.Id, "Update", "FollowUp", id.ToString(), null, dto.Subject, "Success", "Updated via REST API", HttpContext.Connection.RemoteIpAddress?.ToString());
+
+            dto.FollowUpId = id;
+            return Ok(new ApiResponse<FollowUpDto> { Success = true, Message = "Follow-up updated successfully.", Data = dto });
+        }
+
+        // DELETE: api/followups/5
+        [HttpDelete("{id}")]
+        public async Task<ActionResult<ApiResponse<bool>>> DeleteFollowUp(int id)
+        {
+            var user = await _userManager.GetUserAsync(User);
+            if (user == null) return Unauthorized();
+
+            var fu = await _context.FollowUps.FindAsync(id);
+            if (fu == null)
+            {
+                return NotFound(new ApiResponse<bool> { Success = false, Message = $"Follow-up with ID {id} not found." });
+            }
+
+            if (!await _userScopeService.CanAccessRecordAsync(user, fu.AssignedTo))
+            {
+                return Forbid();
+            }
+
+            _context.FollowUps.Remove(fu);
+            await _context.SaveChangesAsync();
+
+            await _auditService.LogAsync(user.Id, "Delete", "FollowUp", id.ToString(), fu.Subject, null, "Success", "Deleted via REST API", HttpContext.Connection.RemoteIpAddress?.ToString());
+
+            return Ok(new ApiResponse<bool> { Success = true, Message = "Follow-up deleted successfully.", Data = true });
+        }
     }
 
     [Route("api/reports")]

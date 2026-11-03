@@ -245,5 +245,95 @@ namespace AcxiomCRM.Controllers.Api
                 Data = dto
             });
         }
+
+        // PUT: api/opportunities/5
+        [HttpPut("{id}")]
+        public async Task<ActionResult<ApiResponse<OpportunityDto>>> UpdateOpportunity(int id, [FromBody] OpportunityDto dto)
+        {
+            var user = await _userManager.GetUserAsync(User);
+            if (user == null) return Unauthorized();
+
+            if (dto.Amount <= 0)
+            {
+                ModelState.AddModelError("Amount", "Opportunity Amount must be greater than 0.");
+            }
+
+            if (dto.Probability < 0 || dto.Probability > 100)
+            {
+                ModelState.AddModelError("Probability", "Probability must be between 0 and 100.");
+            }
+
+            if (!ModelState.IsValid)
+            {
+                var errors = ModelState.Values.SelectMany(v => v.Errors).Select(e => e.ErrorMessage).ToList();
+                return BadRequest(new ApiResponse<OpportunityDto> { Success = false, Message = "Validation failed.", Errors = errors });
+            }
+
+            var opp = await _context.Opportunities.FindAsync(id);
+            if (opp == null)
+            {
+                return NotFound(new ApiResponse<OpportunityDto> { Success = false, Message = $"Opportunity with ID {id} not found." });
+            }
+
+            if (!await _userScopeService.CanAccessRecordAsync(user, opp.AssignedTo))
+            {
+                return Forbid();
+            }
+
+            if (!string.IsNullOrEmpty(dto.AssignedTo) && dto.AssignedTo != opp.AssignedTo)
+            {
+                if (!await _userScopeService.CanAssignToUserAsync(user, dto.AssignedTo))
+                {
+                    return StatusCode(StatusCodes.Status403Forbidden, new ApiResponse<OpportunityDto>
+                    {
+                        Success = false,
+                        Message = "You do not have permission to reassign this opportunity to the selected user."
+                    });
+                }
+                opp.AssignedTo = dto.AssignedTo;
+            }
+
+            opp.OpportunityName = dto.OpportunityName;
+            opp.Amount = dto.Amount;
+            opp.Stage = dto.Stage;
+            opp.Probability = dto.Probability;
+            opp.ExpectedCloseDate = dto.ExpectedCloseDate;
+            opp.Status = dto.Stage == "Won" ? "Won" : (dto.Stage == "Lost" ? "Lost" : "Open");
+            opp.Notes = dto.Notes;
+
+            await _context.SaveChangesAsync();
+
+            await _auditService.LogAsync(user.Id, "Update", "Opportunity", id.ToString(), null, dto.OpportunityName, "Success", "Updated via REST API", HttpContext.Connection.RemoteIpAddress?.ToString());
+
+            dto.OpportunityId = id;
+            dto.WeightedAmount = (opp.Amount * opp.Probability) / 100m;
+            return Ok(new ApiResponse<OpportunityDto> { Success = true, Message = "Opportunity updated successfully.", Data = dto });
+        }
+
+        // DELETE: api/opportunities/5
+        [HttpDelete("{id}")]
+        public async Task<ActionResult<ApiResponse<bool>>> DeleteOpportunity(int id)
+        {
+            var user = await _userManager.GetUserAsync(User);
+            if (user == null) return Unauthorized();
+
+            var opp = await _context.Opportunities.FindAsync(id);
+            if (opp == null)
+            {
+                return NotFound(new ApiResponse<bool> { Success = false, Message = $"Opportunity with ID {id} not found." });
+            }
+
+            if (!await _userScopeService.CanAccessRecordAsync(user, opp.AssignedTo))
+            {
+                return Forbid();
+            }
+
+            _context.Opportunities.Remove(opp);
+            await _context.SaveChangesAsync();
+
+            await _auditService.LogAsync(user.Id, "Delete", "Opportunity", id.ToString(), opp.OpportunityName, null, "Success", "Deleted via REST API", HttpContext.Connection.RemoteIpAddress?.ToString());
+
+            return Ok(new ApiResponse<bool> { Success = true, Message = "Opportunity deleted successfully.", Data = true });
+        }
     }
 }

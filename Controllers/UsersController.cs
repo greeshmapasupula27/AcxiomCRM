@@ -68,6 +68,29 @@ namespace AcxiomCRM.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> Create(RegisterViewModel model)
         {
+            var validRoles = new[] { "Admin", "Manager", "SalesExecutive" };
+            if (!validRoles.Contains(model.Role))
+            {
+                ModelState.AddModelError("Role", "Invalid role selected. Allowed roles: Admin, Manager, SalesExecutive.");
+            }
+
+            // Validate Manager assignment rules
+            if (!string.IsNullOrWhiteSpace(model.ManagerId))
+            {
+                if (model.Role != "SalesExecutive")
+                {
+                    ModelState.AddModelError("ManagerId", "Only SalesExecutive accounts can be assigned to a Manager.");
+                }
+                else
+                {
+                    var manager = await _userManager.FindByIdAsync(model.ManagerId);
+                    if (manager == null || !manager.IsActive || !await _userManager.IsInRoleAsync(manager, "Manager"))
+                    {
+                        ModelState.AddModelError("ManagerId", "Selected manager is invalid, inactive, or not in the Manager role.");
+                    }
+                }
+            }
+
             if (!ModelState.IsValid)
             {
                 var managers = await GetManagersListAsync();
@@ -90,7 +113,7 @@ namespace AcxiomCRM.Controllers
                 Email = model.Email,
                 FullName = model.FullName,
                 PrimaryRole = model.Role,
-                ManagerId = string.IsNullOrWhiteSpace(model.ManagerId) ? null : model.ManagerId,
+                ManagerId = model.Role == "SalesExecutive" && !string.IsNullOrWhiteSpace(model.ManagerId) ? model.ManagerId : null,
                 IsActive = true,
                 CreatedDate = DateTime.UtcNow
             };
@@ -193,9 +216,39 @@ namespace AcxiomCRM.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> EditRole(UserEditRoleViewModel model)
         {
+            var validRoles = new[] { "Admin", "Manager", "SalesExecutive" };
+            if (!validRoles.Contains(model.NewRole))
+            {
+                ModelState.AddModelError("NewRole", "Invalid role selected. Allowed roles: Admin, Manager, SalesExecutive.");
+            }
+
+            // Validate self-assignment as manager
+            if (!string.IsNullOrWhiteSpace(model.ManagerId) && model.ManagerId == model.UserId)
+            {
+                ModelState.AddModelError("ManagerId", "A user cannot be assigned to themselves as Manager.");
+            }
+
+            // Validate manager assignment constraints
+            if (!string.IsNullOrWhiteSpace(model.ManagerId))
+            {
+                if (model.NewRole != "SalesExecutive")
+                {
+                    ModelState.AddModelError("ManagerId", "Only SalesExecutive accounts can be assigned to a Manager.");
+                }
+                else
+                {
+                    var mgr = await _userManager.FindByIdAsync(model.ManagerId);
+                    if (mgr == null || !mgr.IsActive || !await _userManager.IsInRoleAsync(mgr, "Manager"))
+                    {
+                        ModelState.AddModelError("ManagerId", "Selected manager is invalid, inactive, or not in the Manager role.");
+                    }
+                }
+            }
+
             if (!ModelState.IsValid)
             {
                 var managers = await GetManagersListAsync();
+                managers = managers.Where(m => m.Id != model.UserId).ToList();
                 ViewBag.ManagersList = new Microsoft.AspNetCore.Mvc.Rendering.SelectList(managers, "Id", "FullName", model.ManagerId);
                 return View(model);
             }
@@ -208,6 +261,7 @@ namespace AcxiomCRM.Controllers
             {
                 ModelState.AddModelError(string.Empty, "You cannot remove the Admin role from your own current logged-in account.");
                 var managers = await GetManagersListAsync();
+                managers = managers.Where(m => m.Id != model.UserId).ToList();
                 ViewBag.ManagersList = new Microsoft.AspNetCore.Mvc.Rendering.SelectList(managers, "Id", "FullName", model.ManagerId);
                 return View(model);
             }
@@ -215,7 +269,10 @@ namespace AcxiomCRM.Controllers
             var currentRoles = await _userManager.GetRolesAsync(user);
             var oldRole = currentRoles.FirstOrDefault() ?? user.PrimaryRole;
             var oldManagerId = user.ManagerId;
-            var targetManagerId = string.IsNullOrWhiteSpace(model.ManagerId) ? null : model.ManagerId;
+            // Only SalesExecutives maintain a ManagerId; clear it if elevated to Admin or Manager
+            var targetManagerId = model.NewRole == "SalesExecutive" && !string.IsNullOrWhiteSpace(model.ManagerId)
+                ? model.ManagerId
+                : null;
 
             bool roleChanged = oldRole != model.NewRole;
             bool managerChanged = oldManagerId != targetManagerId;
