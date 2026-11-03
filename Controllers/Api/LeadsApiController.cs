@@ -2,6 +2,8 @@ using AcxiomCRM.Data;
 using AcxiomCRM.DTOs;
 using AcxiomCRM.Models;
 using AcxiomCRM.Services;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -9,14 +11,23 @@ namespace AcxiomCRM.Controllers.Api
 {
     [Route("api/leads")]
     [ApiController]
+    [Authorize] // PDF Section 10.1 & 17.14
     public class LeadsApiController : ControllerBase
     {
         private readonly ApplicationDbContext _context;
+        private readonly UserManager<ApplicationUser> _userManager;
+        private readonly IUserScopeService _userScopeService;
         private readonly IAuditService _auditService;
 
-        public LeadsApiController(ApplicationDbContext context, IAuditService auditService)
+        public LeadsApiController(
+            ApplicationDbContext context,
+            UserManager<ApplicationUser> userManager,
+            IUserScopeService userScopeService,
+            IAuditService auditService)
         {
             _context = context;
+            _userManager = userManager;
+            _userScopeService = userScopeService;
             _auditService = auditService;
         }
 
@@ -24,7 +35,16 @@ namespace AcxiomCRM.Controllers.Api
         [HttpGet]
         public async Task<ActionResult<ApiResponse<IEnumerable<LeadDto>>>> GetLeads([FromQuery] string? status)
         {
-            var query = _context.Leads.AsNoTracking();
+            var user = await _userManager.GetUserAsync(User);
+            if (user == null) return Unauthorized();
+
+            var accessibleUserIds = await _userScopeService.GetAccessibleUserIdsAsync(user);
+            IQueryable<Lead> query = _context.Leads.AsNoTracking();
+
+            if (accessibleUserIds != null)
+            {
+                query = query.Where(l => l.AssignedTo != null && accessibleUserIds.Contains(l.AssignedTo));
+            }
 
             if (!string.IsNullOrWhiteSpace(status))
             {
@@ -56,10 +76,51 @@ namespace AcxiomCRM.Controllers.Api
             });
         }
 
+        // GET: api/leads/5
+        [HttpGet("{id}")]
+        public async Task<ActionResult<ApiResponse<LeadDto>>> GetLead(int id)
+        {
+            var user = await _userManager.GetUserAsync(User);
+            if (user == null) return Unauthorized();
+
+            var l = await _context.Leads.FindAsync(id);
+            if (l == null)
+            {
+                return NotFound(new ApiResponse<LeadDto> { Success = false, Message = $"Lead with ID {id} not found." });
+            }
+
+            if (!await _userScopeService.CanAccessRecordAsync(user, l.AssignedTo))
+            {
+                return Forbid();
+            }
+
+            var dto = new LeadDto
+            {
+                LeadId = l.LeadId,
+                LeadCode = l.LeadCode,
+                LeadName = l.LeadName,
+                Email = l.Email,
+                Phone = l.Phone,
+                CompanyName = l.CompanyName,
+                Source = l.Source,
+                Status = l.Status,
+                Priority = l.Priority,
+                ExpectedValue = l.ExpectedValue,
+                CreatedDate = l.CreatedDate,
+                AssignedTo = l.AssignedTo,
+                Notes = l.Notes
+            };
+
+            return Ok(new ApiResponse<LeadDto> { Success = true, Data = dto });
+        }
+
         // POST: api/leads
         [HttpPost]
         public async Task<ActionResult<ApiResponse<LeadDto>>> CreateLead([FromBody] LeadDto dto)
         {
+            var user = await _userManager.GetUserAsync(User);
+            if (user == null) return Unauthorized();
+
             if (dto.ExpectedValue <= 0)
             {
                 ModelState.AddModelError("ExpectedValue", "Expected Value must be greater than 0.");
@@ -82,6 +143,7 @@ namespace AcxiomCRM.Controllers.Api
                 Status = string.IsNullOrEmpty(dto.Status) ? "New" : dto.Status,
                 Priority = string.IsNullOrEmpty(dto.Priority) ? "Medium" : dto.Priority,
                 ExpectedValue = dto.ExpectedValue,
+                AssignedTo = string.IsNullOrEmpty(dto.AssignedTo) ? user.Id : dto.AssignedTo,
                 Notes = dto.Notes,
                 CreatedDate = DateTime.UtcNow
             };
@@ -91,9 +153,10 @@ namespace AcxiomCRM.Controllers.Api
 
             dto.LeadId = lead.LeadId;
             dto.LeadCode = lead.LeadCode;
+            dto.AssignedTo = lead.AssignedTo;
             dto.CreatedDate = lead.CreatedDate;
 
-            await _auditService.LogAsync(null, "Create", "Lead", lead.LeadId.ToString(), null, dto.LeadName, "Success", "Created via REST API", HttpContext.Connection.RemoteIpAddress?.ToString());
+            await _auditService.LogAsync(user.Id, "Create", "Lead", lead.LeadId.ToString(), null, dto.LeadName, "Success", "Created via REST API", HttpContext.Connection.RemoteIpAddress?.ToString());
 
             return StatusCode(201, new ApiResponse<LeadDto>
             {

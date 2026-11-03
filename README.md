@@ -89,12 +89,14 @@ The system automatically initializes and seeds the database with compliant users
 
 ## 4. REST API Specification
 
-All endpoints communicate via JSON using clean DTO models without leaking internal database schemas or passwords:
+All REST endpoints communicate via JSON using clean DTO projections, enforce `[Authorize]` authentication, return `401 Unauthorized` (rather than HTML redirects) when unauthenticated, and scope query results to the caller's role:
 
 | Method | Endpoint | Description |
 | :--- | :--- | :--- |
-| `GET` | `/api/customers` | Search & list customer accounts |
-| `GET` | `/api/customers/{id}` | Retrieve individual customer by ID |
+| `POST` | `/api/auth/login` | Authenticate using JSON credentials (`email`, `password`) and receive session cookie |
+| `POST` | `/api/auth/logout` | End current API session and log audit event |
+| `GET` | `/api/customers` | Search & list accessible customer accounts |
+| `GET` | `/api/customers/{id}` | Retrieve individual customer by ID (with ownership check) |
 | `POST` | `/api/customers` | Create new customer (enforces email/phone uniqueness) |
 | `PUT` | `/api/customers/{id}` | Update customer record |
 | `DELETE` | `/api/customers/{id}` | Delete customer record |
@@ -108,19 +110,31 @@ All endpoints communicate via JSON using clean DTO models without leaking intern
 
 ---
 
-## 5. How to Run & Test
+## 5. Security & Governance Enhancements
 
-### Running the Application:
+- **Public Self-Registration Hardening**: Public sign-up (`/Account/Register`) is restricted strictly to the `SalesExecutive` role. Unauthenticated visitors cannot elevate themselves to `Admin` or `Manager`.
+- **Administrative Role Management**: Dedicated Admin workflow (`/Users/EditRole/{id}`) allowing administrators to assign and alter user role scopes with mandatory audit trails.
+- **Hierarchical Team Scoping**: Managers have visibility over their direct team's records via `ManagerId`, while sales representatives can only access records they own.
+- **DbContext-Level Audit Immutability**: The `ApplicationDbContext` intercepts changes to `AuditLogs` and throws an `InvalidOperationException` if any modification or deletion is attempted.
+- **Reverse Proxy Support**: Configured with `UseForwardedHeaders` for seamless operation behind Cloudflare and production reverse proxies.
+
+---
+
+## 6. Live Running Deployment & Local Execution
+
+### Live Demo Link:
+- **Public URL**: [https://implemented-realtors-rubber-paste.trycloudflare.com](https://implemented-realtors-rubber-paste.trycloudflare.com)
+
+### Local Execution:
 Open PowerShell in the project directory:
 ```powershell
-cd "C:\Users\grees\.gemini\antigravity\scratch\AcxiomCRM"
-dotnet run --urls "http://127.0.0.1:5000"
+dotnet run --urls "http://0.0.0.0:5000"
 ```
-Then navigate to: **`http://127.0.0.1:5000`** in your browser.
+Then navigate to **`http://localhost:5000`** or **`http://127.0.0.1:5000`** in your browser.
 
-### Running the Acceptance Test Suite:
-To execute the automated test verification suite matching Section 17.19 of the documentation:
+### Running Acceptance & Security Test Suite:
+To execute the automated acceptance test verification suite matching Section 17.19 of the AcxiomCRM documentation:
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\verify_crm.ps1
+powershell -ExecutionPolicy Bypass -File .\verify_crm.ps1 -baseUrl "http://127.0.0.1:5000"
 ```
-Result: **100% Pass** on all 14 mandatory acceptance scenarios.
+Result: **100% Pass** across all mandatory validation, authentication, authorization, and data integrity scenarios.

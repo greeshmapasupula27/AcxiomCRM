@@ -14,12 +14,18 @@ namespace AcxiomCRM.Controllers
     {
         private readonly ApplicationDbContext _context;
         private readonly UserManager<ApplicationUser> _userManager;
+        private readonly IUserScopeService _userScopeService;
         private readonly IAuditService _auditService;
 
-        public CustomersController(ApplicationDbContext context, UserManager<ApplicationUser> userManager, IAuditService auditService)
+        public CustomersController(
+            ApplicationDbContext context,
+            UserManager<ApplicationUser> userManager,
+            IUserScopeService userScopeService,
+            IAuditService auditService)
         {
             _context = context;
             _userManager = userManager;
+            _userScopeService = userScopeService;
             _auditService = auditService;
         }
 
@@ -28,14 +34,13 @@ namespace AcxiomCRM.Controllers
         {
             var user = await _userManager.GetUserAsync(User);
             if (user == null) return Challenge();
-            var roles = await _userManager.GetRolesAsync(user);
-            var isSales = roles.Contains("SalesExecutive") && !roles.Contains("Admin") && !roles.Contains("Manager");
 
+            var accessibleUserIds = await _userScopeService.GetAccessibleUserIdsAsync(user);
             IQueryable<Customer> query = _context.Customers.Include(c => c.Owner);
 
-            if (isSales)
+            if (accessibleUserIds != null)
             {
-                query = query.Where(c => c.CreatedBy == user.Id);
+                query = query.Where(c => c.CreatedBy != null && accessibleUserIds.Contains(c.CreatedBy));
             }
 
             // Search filter (Section 17.13: Customer Name, Email, Phone, Company)
@@ -91,8 +96,7 @@ namespace AcxiomCRM.Controllers
             if (customer == null) return NotFound();
 
             var user = await _userManager.GetUserAsync(User);
-            var roles = await _userManager.GetRolesAsync(user!);
-            if (roles.Contains("SalesExecutive") && !roles.Contains("Admin") && !roles.Contains("Manager") && customer.CreatedBy != user!.Id)
+            if (user == null || !await _userScopeService.CanAccessRecordAsync(user, customer.CreatedBy))
             {
                 return Forbid();
             }
@@ -171,8 +175,7 @@ namespace AcxiomCRM.Controllers
             if (customer == null) return NotFound();
 
             var user = await _userManager.GetUserAsync(User);
-            var roles = await _userManager.GetRolesAsync(user!);
-            if (roles.Contains("SalesExecutive") && !roles.Contains("Admin") && !roles.Contains("Manager") && customer.CreatedBy != user!.Id)
+            if (user == null || !await _userScopeService.CanAccessRecordAsync(user, customer.CreatedBy))
             {
                 return Forbid();
             }
@@ -186,6 +189,15 @@ namespace AcxiomCRM.Controllers
         public async Task<IActionResult> Edit(int id, Customer customer)
         {
             if (id != customer.CustomerId) return NotFound();
+
+            var user = await _userManager.GetUserAsync(User);
+            var existing = await _context.Customers.AsNoTracking().FirstOrDefaultAsync(c => c.CustomerId == id);
+            if (existing == null) return NotFound();
+
+            if (user == null || !await _userScopeService.CanAccessRecordAsync(user, existing.CreatedBy))
+            {
+                return Forbid();
+            }
 
             // Validate email & phone uniqueness excluding self
             if (await _context.Customers.AnyAsync(c => c.Email.ToLower() == customer.Email.ToLower() && c.CustomerId != id))
@@ -202,10 +214,6 @@ namespace AcxiomCRM.Controllers
             {
                 try
                 {
-                    var existing = await _context.Customers.AsNoTracking().FirstOrDefaultAsync(c => c.CustomerId == id);
-                    if (existing == null) return NotFound();
-
-                    var user = await _userManager.GetUserAsync(User);
                     customer.ModifiedDate = DateTime.UtcNow;
                     customer.CreatedBy = existing.CreatedBy;
                     customer.CreatedDate = existing.CreatedDate;
@@ -214,7 +222,7 @@ namespace AcxiomCRM.Controllers
                     await _context.SaveChangesAsync();
 
                     await _auditService.LogAsync(
-                        user?.Id,
+                        user.Id,
                         "Update",
                         "Customer",
                         customer.CustomerId.ToString(),
@@ -248,6 +256,12 @@ namespace AcxiomCRM.Controllers
 
             if (customer == null) return NotFound();
 
+            var user = await _userManager.GetUserAsync(User);
+            if (user == null || !await _userScopeService.CanAccessRecordAsync(user, customer.CreatedBy))
+            {
+                return Forbid();
+            }
+
             return View(customer);
         }
 
@@ -257,28 +271,31 @@ namespace AcxiomCRM.Controllers
         public async Task<IActionResult> DeleteConfirmed(int id)
         {
             var customer = await _context.Customers.FindAsync(id);
-            if (customer != null)
+            if (customer == null) return NotFound();
+
+            var user = await _userManager.GetUserAsync(User);
+            if (user == null || !await _userScopeService.CanAccessRecordAsync(user, customer.CreatedBy))
             {
-                var user = await _userManager.GetUserAsync(User);
-                var oldData = JsonSerializer.Serialize(new { customer.CustomerName, customer.Email, customer.Phone });
-
-                _context.Customers.Remove(customer);
-                await _context.SaveChangesAsync();
-
-                await _auditService.LogAsync(
-                    user?.Id,
-                    "Delete",
-                    "Customer",
-                    id.ToString(),
-                    oldData,
-                    null,
-                    "Success",
-                    $"Deleted customer {customer.CustomerName}",
-                    HttpContext.Connection.RemoteIpAddress?.ToString());
-
-                TempData["SuccessMessage"] = $"Customer '{customer.CustomerName}' removed successfully.";
+                return Forbid();
             }
 
+            var oldData = JsonSerializer.Serialize(new { customer.CustomerName, customer.Email, customer.Phone });
+
+            _context.Customers.Remove(customer);
+            await _context.SaveChangesAsync();
+
+            await _auditService.LogAsync(
+                user.Id,
+                "Delete",
+                "Customer",
+                id.ToString(),
+                oldData,
+                null,
+                "Success",
+                $"Deleted customer {customer.CustomerName}",
+                HttpContext.Connection.RemoteIpAddress?.ToString());
+
+            TempData["SuccessMessage"] = $"Customer '{customer.CustomerName}' removed successfully.";
             return RedirectToAction(nameof(Index));
         }
     }

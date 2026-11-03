@@ -1,6 +1,7 @@
 using AcxiomCRM.Data;
 using AcxiomCRM.Models;
 using AcxiomCRM.ViewModels;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 
 namespace AcxiomCRM.Services
@@ -8,14 +9,22 @@ namespace AcxiomCRM.Services
     public class DashboardService : IDashboardService
     {
         private readonly ApplicationDbContext _context;
+        private readonly UserManager<ApplicationUser> _userManager;
+        private readonly IUserScopeService _userScopeService;
 
-        public DashboardService(ApplicationDbContext context)
+        public DashboardService(
+            ApplicationDbContext context,
+            UserManager<ApplicationUser> userManager,
+            IUserScopeService userScopeService)
         {
             _context = context;
+            _userManager = userManager;
+            _userScopeService = userScopeService;
         }
 
         public async Task<DashboardViewModel> GetDashboardMetricsAsync(string userId, string role, string dateFilter, DateTime? startDate = null, DateTime? endDate = null)
         {
+            var user = await _userManager.FindByIdAsync(userId);
             var vm = new DashboardViewModel
             {
                 DateFilter = dateFilter,
@@ -51,23 +60,27 @@ namespace AcxiomCRM.Services
                     break;
             }
 
-            // Base queries
+            // Scoping: Admin = All, Manager = Team, SalesExecutive = Self (PDF Section 7 & 17.10)
+            List<string>? accessibleUserIds = null;
+            if (user != null)
+            {
+                accessibleUserIds = await _userScopeService.GetAccessibleUserIdsAsync(user);
+            }
+
             IQueryable<Customer> customerQ = _context.Customers.AsNoTracking();
             IQueryable<Lead> leadQ = _context.Leads.AsNoTracking();
             IQueryable<Opportunity> oppQ = _context.Opportunities.Include(o => o.Customer).AsNoTracking();
             IQueryable<FollowUp> followUpQ = _context.FollowUps.Include(f => f.Customer).Include(f => f.Lead).AsNoTracking();
             IQueryable<Activity> activityQ = _context.Activities.Include(a => a.Customer).Include(a => a.Lead).AsNoTracking();
 
-            // Role Scoping
-            if (role == "SalesExecutive")
+            if (accessibleUserIds != null)
             {
-                customerQ = customerQ.Where(c => c.CreatedBy == userId);
-                leadQ = leadQ.Where(l => l.AssignedTo == userId);
-                oppQ = oppQ.Where(o => o.AssignedTo == userId);
-                followUpQ = followUpQ.Where(f => f.AssignedTo == userId);
-                activityQ = activityQ.Where(a => a.AssignedTo == userId);
+                customerQ = customerQ.Where(c => c.CreatedBy != null && accessibleUserIds.Contains(c.CreatedBy));
+                leadQ = leadQ.Where(l => l.AssignedTo != null && accessibleUserIds.Contains(l.AssignedTo));
+                oppQ = oppQ.Where(o => o.AssignedTo != null && accessibleUserIds.Contains(o.AssignedTo));
+                followUpQ = followUpQ.Where(f => f.AssignedTo != null && accessibleUserIds.Contains(f.AssignedTo));
+                activityQ = activityQ.Where(a => a.AssignedTo != null && accessibleUserIds.Contains(a.AssignedTo));
             }
-            // Admin and Manager can view all team records
 
             // Apply date filters where applicable to creation / activity
             if (fromDate.HasValue)
@@ -83,7 +96,7 @@ namespace AcxiomCRM.Services
                 oppQ = oppQ.Where(o => o.CreatedDate <= toDate.Value);
             }
 
-            // Metric cards
+            // Metric cards (Section 17.11)
             vm.TotalCustomers = await customerQ.CountAsync();
             vm.TotalLeads = await leadQ.CountAsync();
             vm.OpenLeads = await leadQ.CountAsync(l => l.Status != "Converted" && l.Status != "Lost");
@@ -100,7 +113,7 @@ namespace AcxiomCRM.Services
             vm.PendingFollowUps = await followUpQ.CountAsync(f => f.Status == "Planned");
             vm.OverdueFollowUps = await followUpQ.CountAsync(f => f.Status == "Planned" && f.FollowUpDate < DateTime.UtcNow.Date);
 
-            // Chart 1: Lead Status (New, Contacted, Qualified, Unqualified, Converted, Lost)
+            // Chart 1: Lead Status (Section 17.12)
             var leadStatuses = new[] { "New", "Contacted", "Qualified", "Unqualified", "Converted", "Lost" };
             var leadStatusGroup = await leadQ
                 .GroupBy(l => l.Status)
@@ -113,12 +126,13 @@ namespace AcxiomCRM.Services
                 vm.LeadStatusCounts.Add(leadStatusGroup.TryGetValue(status, out var count) ? count : 0);
             }
 
-            // Chart 2: Opportunity Pipeline Stages (Qualification, Proposal, Negotiation, Won, Lost)
+            // Chart 2: Opportunity Pipeline Stages
             var pipelineStages = new[] { "Qualification", "Proposal", "Negotiation", "Won", "Lost" };
-            var oppStageGroup = await oppQ
+            var oppList = await oppQ.ToListAsync();
+            var oppStageGroup = oppList
                 .GroupBy(o => o.Stage)
                 .Select(g => new { Stage = g.Key, TotalAmount = g.Sum(x => x.Amount), Count = g.Count() })
-                .ToDictionaryAsync(x => x.Stage, x => x);
+                .ToDictionary(x => x.Stage, x => x);
 
             foreach (var stage in pipelineStages)
             {
@@ -135,7 +149,17 @@ namespace AcxiomCRM.Services
                 }
             }
 
-            // Chart 3: Monthly Sales / Won Amount over last 6 months
+            // Chart 3: Monthly Sales / Won Amount over last 6 months (scoped)
+            IQueryable<Opportunity> monthlyWonQ = _context.Opportunities.AsNoTracking()
+                .Where(o => o.Stage == "Won" || o.Status == "Won");
+
+            if (accessibleUserIds != null)
+            {
+                monthlyWonQ = monthlyWonQ.Where(o => o.AssignedTo != null && accessibleUserIds.Contains(o.AssignedTo));
+            }
+
+            var allWonOpps = await monthlyWonQ.ToListAsync();
+
             for (int i = 5; i >= 0; i--)
             {
                 var monthDate = DateTime.UtcNow.AddMonths(-i);
@@ -143,9 +167,9 @@ namespace AcxiomCRM.Services
                 var monthEnd = monthStart.AddMonths(1).AddTicks(-1);
                 var monthName = monthStart.ToString("MMM yyyy");
 
-                var monthlyWon = await _context.Opportunities
-                    .Where(o => (o.Stage == "Won" || o.Status == "Won") && o.CreatedDate >= monthStart && o.CreatedDate <= monthEnd)
-                    .SumAsync(o => (decimal?)o.Amount) ?? 0m;
+                var monthlyWon = allWonOpps
+                    .Where(o => o.CreatedDate >= monthStart && o.CreatedDate <= monthEnd)
+                    .Sum(o => o.Amount);
 
                 vm.MonthlySalesLabels.Add(monthName);
                 vm.MonthlySalesAmounts.Add(monthlyWon);

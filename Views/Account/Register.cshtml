@@ -9,7 +9,7 @@
         <div class="col-12 col-md-8 col-lg-6">
             <div class="card shadow-lg border-0 rounded-4 overflow-hidden">
                 <div class="card-header bg-dark text-white text-center py-4">
-                    <h3 class="fw-bold mb-1"><i class="bi bi-person-plus-fill me-2 text-primary"></i>Create CRM Account</h3>
+                    <h3 class="fw-bold mb-1"><i class="bi bi-person-plus-fill me-2 text-primary"></i>Create Sales Account</h3>
                     <p class="mb-0 text-white-50 small">Register your profile to access sales operations</p>
                 </div>
 
@@ -31,14 +31,8 @@
                             <span asp-validation-for="Email" class="text-danger small"></span>
                         </div>
 
-                        <div class="mb-3">
-                            <label asp-for="Role" class="form-label fw-semibold">Designated Role</label>
-                            <select asp-for="Role" class="form-select">
-                                <option value="SalesExecutive">Sales Executive</option>
-                                <option value="Manager">Manager</option>
-                                <option value="Admin">Admin</option>
-                            </select>
-                            <span asp-validation-for="Role" class="text-danger small"></span>
+                        <div class="alert alert-light border small text-muted mb-3">
+                            <i class="bi bi-shield-lock me-1 text-primary"></i> <strong>Role Scope:</strong> Standard account registration provisions access as <strong>Sales Executive</strong>. (Administrative and Managerial privileges are granted by system administrators).
                         </div>
 
                         <div class="row">

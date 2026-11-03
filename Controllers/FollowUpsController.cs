@@ -15,12 +15,18 @@ namespace AcxiomCRM.Controllers
     {
         private readonly ApplicationDbContext _context;
         private readonly UserManager<ApplicationUser> _userManager;
+        private readonly IUserScopeService _userScopeService;
         private readonly IAuditService _auditService;
 
-        public FollowUpsController(ApplicationDbContext context, UserManager<ApplicationUser> userManager, IAuditService auditService)
+        public FollowUpsController(
+            ApplicationDbContext context,
+            UserManager<ApplicationUser> userManager,
+            IUserScopeService userScopeService,
+            IAuditService auditService)
         {
             _context = context;
             _userManager = userManager;
+            _userScopeService = userScopeService;
             _auditService = auditService;
         }
 
@@ -29,18 +35,17 @@ namespace AcxiomCRM.Controllers
         {
             var user = await _userManager.GetUserAsync(User);
             if (user == null) return Challenge();
-            var roles = await _userManager.GetRolesAsync(user);
-            var isSales = roles.Contains("SalesExecutive") && !roles.Contains("Admin") && !roles.Contains("Manager");
 
+            var accessibleUserIds = await _userScopeService.GetAccessibleUserIdsAsync(user);
             IQueryable<FollowUp> query = _context.FollowUps
                 .Include(f => f.Customer)
                 .Include(f => f.Lead)
                 .Include(f => f.Opportunity)
                 .Include(f => f.AssignedUser);
 
-            if (isSales)
+            if (accessibleUserIds != null)
             {
-                query = query.Where(f => f.AssignedTo == user.Id);
+                query = query.Where(f => f.AssignedTo != null && accessibleUserIds.Contains(f.AssignedTo));
             }
 
             if (!string.IsNullOrWhiteSpace(status))
@@ -79,7 +84,12 @@ namespace AcxiomCRM.Controllers
             ViewBag.TotalPages = (int)Math.Ceiling(totalCount / (double)pageSize);
             ViewBag.TotalCount = totalCount;
 
-            ViewBag.UsersList = new SelectList(await _context.Users.Where(u => u.IsActive).ToListAsync(), "Id", "FullName");
+            var usersListQuery = _context.Users.Where(u => u.IsActive);
+            if (accessibleUserIds != null)
+            {
+                usersListQuery = usersListQuery.Where(u => accessibleUserIds.Contains(u.Id));
+            }
+            ViewBag.UsersList = new SelectList(await usersListQuery.ToListAsync(), "Id", "FullName");
 
             return View(items);
         }
@@ -87,6 +97,7 @@ namespace AcxiomCRM.Controllers
         // GET: FollowUps/Create
         public async Task<IActionResult> Create(int? customerId, int? leadId, int? opportunityId)
         {
+            var user = await _userManager.GetUserAsync(User);
             var fu = new FollowUp
             {
                 FollowUpDate = DateTime.UtcNow.Date.AddDays(1),
@@ -94,11 +105,9 @@ namespace AcxiomCRM.Controllers
                 FollowUpType = "Call",
                 CustomerId = customerId,
                 LeadId = leadId,
-                OpportunityId = opportunityId
+                OpportunityId = opportunityId,
+                AssignedTo = user?.Id
             };
-
-            var user = await _userManager.GetUserAsync(User);
-            fu.AssignedTo = user?.Id;
 
             await PopulateDropDownsAsync(fu);
             return View(fu);
@@ -109,6 +118,9 @@ namespace AcxiomCRM.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> Create(FollowUp followUp)
         {
+            var user = await _userManager.GetUserAsync(User);
+            if (user == null) return Challenge();
+
             // Business rule: Follow-up date cannot be earlier than today for a new/planned follow-up
             if (followUp.Status == "Planned" && followUp.FollowUpDate.Date < DateTime.UtcNow.Date)
             {
@@ -117,13 +129,17 @@ namespace AcxiomCRM.Controllers
 
             if (ModelState.IsValid)
             {
+                if (string.IsNullOrEmpty(followUp.AssignedTo))
+                {
+                    followUp.AssignedTo = user.Id;
+                }
+
                 followUp.CreatedDate = DateTime.UtcNow;
                 _context.Add(followUp);
                 await _context.SaveChangesAsync();
 
-                var user = await _userManager.GetUserAsync(User);
                 await _auditService.LogAsync(
-                    user?.Id,
+                    user.Id,
                     "Create",
                     "FollowUp",
                     followUp.FollowUpId.ToString(),
@@ -146,8 +162,16 @@ namespace AcxiomCRM.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> Complete(int id, string? completionRemarks)
         {
+            var user = await _userManager.GetUserAsync(User);
+            if (user == null) return Challenge();
+
             var followUp = await _context.FollowUps.FindAsync(id);
             if (followUp == null) return NotFound();
+
+            if (!await _userScopeService.CanAccessRecordAsync(user, followUp.AssignedTo))
+            {
+                return Forbid();
+            }
 
             var oldStatus = followUp.Status;
             followUp.Status = "Completed";
@@ -174,9 +198,8 @@ namespace AcxiomCRM.Controllers
 
             await _context.SaveChangesAsync();
 
-            var user = await _userManager.GetUserAsync(User);
             await _auditService.LogAsync(
-                user?.Id,
+                user.Id,
                 "Complete",
                 "FollowUp",
                 id.ToString(),
@@ -198,6 +221,12 @@ namespace AcxiomCRM.Controllers
             var followUp = await _context.FollowUps.FindAsync(id);
             if (followUp == null) return NotFound();
 
+            var user = await _userManager.GetUserAsync(User);
+            if (user == null || !await _userScopeService.CanAccessRecordAsync(user, followUp.AssignedTo))
+            {
+                return Forbid();
+            }
+
             await PopulateDropDownsAsync(followUp);
             return View(followUp);
         }
@@ -209,20 +238,31 @@ namespace AcxiomCRM.Controllers
         {
             if (id != followUp.FollowUpId) return NotFound();
 
+            var user = await _userManager.GetUserAsync(User);
+            var existing = await _context.FollowUps.AsNoTracking().FirstOrDefaultAsync(f => f.FollowUpId == id);
+            if (existing == null) return NotFound();
+
+            if (user == null || !await _userScopeService.CanAccessRecordAsync(user, existing.AssignedTo))
+            {
+                return Forbid();
+            }
+
+            // Validation: Follow-up date cannot be in the past for planned follow-up (PDF Section 5.3 & 17.7)
+            if (followUp.Status == "Planned" && followUp.FollowUpDate.Date < DateTime.UtcNow.Date)
+            {
+                ModelState.AddModelError("FollowUpDate", "Follow-up date cannot be earlier than today.");
+            }
+
             if (ModelState.IsValid)
             {
                 try
                 {
-                    var existing = await _context.FollowUps.AsNoTracking().FirstOrDefaultAsync(f => f.FollowUpId == id);
-                    if (existing == null) return NotFound();
-
                     followUp.CreatedDate = existing.CreatedDate;
                     _context.Update(followUp);
                     await _context.SaveChangesAsync();
 
-                    var user = await _userManager.GetUserAsync(User);
                     await _auditService.LogAsync(
-                        user?.Id,
+                        user.Id,
                         "Update",
                         "FollowUp",
                         followUp.FollowUpId.ToString(),
@@ -252,35 +292,54 @@ namespace AcxiomCRM.Controllers
         public async Task<IActionResult> Delete(int id)
         {
             var followUp = await _context.FollowUps.FindAsync(id);
-            if (followUp != null)
+            if (followUp == null) return NotFound();
+
+            var user = await _userManager.GetUserAsync(User);
+            if (user == null || !await _userScopeService.CanAccessRecordAsync(user, followUp.AssignedTo))
             {
-                var user = await _userManager.GetUserAsync(User);
-                _context.FollowUps.Remove(followUp);
-                await _context.SaveChangesAsync();
-
-                await _auditService.LogAsync(
-                    user?.Id,
-                    "Delete",
-                    "FollowUp",
-                    id.ToString(),
-                    followUp.Subject,
-                    null,
-                    "Success",
-                    $"Deleted follow-up '{followUp.Subject}'",
-                    HttpContext.Connection.RemoteIpAddress?.ToString());
-
-                TempData["SuccessMessage"] = "Follow-up deleted.";
+                return Forbid();
             }
 
+            _context.FollowUps.Remove(followUp);
+            await _context.SaveChangesAsync();
+
+            await _auditService.LogAsync(
+                user.Id,
+                "Delete",
+                "FollowUp",
+                id.ToString(),
+                followUp.Subject,
+                null,
+                "Success",
+                $"Deleted follow-up '{followUp.Subject}'",
+                HttpContext.Connection.RemoteIpAddress?.ToString());
+
+            TempData["SuccessMessage"] = "Follow-up deleted.";
             return RedirectToAction(nameof(Index));
         }
 
         private async Task PopulateDropDownsAsync(FollowUp fu)
         {
-            ViewBag.CustomersList = new SelectList(await _context.Customers.OrderBy(c => c.CustomerName).ToListAsync(), "CustomerId", "CustomerName", fu.CustomerId);
-            ViewBag.LeadsList = new SelectList(await _context.Leads.OrderBy(l => l.LeadName).ToListAsync(), "LeadId", "LeadName", fu.LeadId);
-            ViewBag.OpportunitiesList = new SelectList(await _context.Opportunities.OrderBy(o => o.OpportunityName).ToListAsync(), "OpportunityId", "OpportunityName", fu.OpportunityId);
-            ViewBag.UsersList = new SelectList(await _context.Users.Where(u => u.IsActive).ToListAsync(), "Id", "FullName", fu.AssignedTo);
+            var user = await _userManager.GetUserAsync(User);
+            var accessibleUserIds = user != null ? await _userScopeService.GetAccessibleUserIdsAsync(user) : null;
+
+            IQueryable<Customer> custQuery = _context.Customers;
+            IQueryable<Lead> leadQuery = _context.Leads;
+            IQueryable<Opportunity> oppQuery = _context.Opportunities;
+            IQueryable<ApplicationUser> userQuery = _context.Users.Where(u => u.IsActive);
+
+            if (accessibleUserIds != null)
+            {
+                custQuery = custQuery.Where(c => c.CreatedBy != null && accessibleUserIds.Contains(c.CreatedBy));
+                leadQuery = leadQuery.Where(l => l.AssignedTo != null && accessibleUserIds.Contains(l.AssignedTo));
+                oppQuery = oppQuery.Where(o => o.AssignedTo != null && accessibleUserIds.Contains(o.AssignedTo));
+                userQuery = userQuery.Where(u => accessibleUserIds.Contains(u.Id));
+            }
+
+            ViewBag.CustomersList = new SelectList(await custQuery.OrderBy(c => c.CustomerName).ToListAsync(), "CustomerId", "CustomerName", fu.CustomerId);
+            ViewBag.LeadsList = new SelectList(await leadQuery.OrderBy(l => l.LeadName).ToListAsync(), "LeadId", "LeadName", fu.LeadId);
+            ViewBag.OpportunitiesList = new SelectList(await oppQuery.OrderBy(o => o.OpportunityName).ToListAsync(), "OpportunityId", "OpportunityName", fu.OpportunityId);
+            ViewBag.UsersList = new SelectList(await userQuery.ToListAsync(), "Id", "FullName", fu.AssignedTo);
         }
     }
 }

@@ -114,12 +114,15 @@ namespace AcxiomCRM.Controllers
                 return View(model);
             }
 
+            // SECURITY FIX: Public registration must never allow self-assignment of Admin or Manager roles (PDF Section 4.7 & 17.10)
+            const string enforcedRole = "SalesExecutive";
+
             var user = new ApplicationUser
             {
                 UserName = model.Email,
                 Email = model.Email,
                 FullName = model.FullName,
-                PrimaryRole = model.Role,
+                PrimaryRole = enforcedRole,
                 IsActive = true,
                 CreatedDate = DateTime.UtcNow
             };
@@ -127,13 +130,13 @@ namespace AcxiomCRM.Controllers
             var result = await _userManager.CreateAsync(user, model.Password);
             if (result.Succeeded)
             {
-                if (!await _roleManager.RoleExistsAsync(model.Role))
+                if (!await _roleManager.RoleExistsAsync(enforcedRole))
                 {
-                    await _roleManager.CreateAsync(new IdentityRole(model.Role));
+                    await _roleManager.CreateAsync(new IdentityRole(enforcedRole));
                 }
-                await _userManager.AddToRoleAsync(user, model.Role);
+                await _userManager.AddToRoleAsync(user, enforcedRole);
 
-                await _auditService.LogAsync(user.Id, "Create", "User", user.Email, null, $"Role: {model.Role}", "Success", "Self-registered new user", GetIpAddress());
+                await _auditService.LogAsync(user.Id, "Create", "User", user.Email, null, $"Role: {enforcedRole}", "Success", "Public self-registered new Sales Executive account", GetIpAddress());
                 await _signInManager.SignInAsync(user, isPersistent: false);
 
                 return RedirectToAction("Index", "Dashboard");

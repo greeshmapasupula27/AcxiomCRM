@@ -16,12 +16,18 @@ namespace AcxiomCRM.Controllers
     {
         private readonly ApplicationDbContext _context;
         private readonly UserManager<ApplicationUser> _userManager;
+        private readonly IUserScopeService _userScopeService;
         private readonly IAuditService _auditService;
 
-        public LeadsController(ApplicationDbContext context, UserManager<ApplicationUser> userManager, IAuditService auditService)
+        public LeadsController(
+            ApplicationDbContext context,
+            UserManager<ApplicationUser> userManager,
+            IUserScopeService userScopeService,
+            IAuditService auditService)
         {
             _context = context;
             _userManager = userManager;
+            _userScopeService = userScopeService;
             _auditService = auditService;
         }
 
@@ -30,14 +36,13 @@ namespace AcxiomCRM.Controllers
         {
             var user = await _userManager.GetUserAsync(User);
             if (user == null) return Challenge();
-            var roles = await _userManager.GetRolesAsync(user);
-            var isSales = roles.Contains("SalesExecutive") && !roles.Contains("Admin") && !roles.Contains("Manager");
 
+            var accessibleUserIds = await _userScopeService.GetAccessibleUserIdsAsync(user);
             IQueryable<Lead> query = _context.Leads.Include(l => l.AssignedUser);
 
-            if (isSales)
+            if (accessibleUserIds != null)
             {
-                query = query.Where(l => l.AssignedTo == user.Id);
+                query = query.Where(l => l.AssignedTo != null && accessibleUserIds.Contains(l.AssignedTo));
             }
 
             // Search filter (Section 17.13: Lead Name, Company, Status, Assigned User)
@@ -80,8 +85,13 @@ namespace AcxiomCRM.Controllers
             ViewBag.TotalPages = (int)Math.Ceiling(totalCount / (double)pageSize);
             ViewBag.TotalCount = totalCount;
 
-            // Dropdowns
-            ViewBag.UsersList = new SelectList(await _context.Users.Where(u => u.IsActive).ToListAsync(), "Id", "FullName");
+            // Scoped Users List for Dropdown
+            var usersListQuery = _context.Users.Where(u => u.IsActive);
+            if (accessibleUserIds != null)
+            {
+                usersListQuery = usersListQuery.Where(u => accessibleUserIds.Contains(u.Id));
+            }
+            ViewBag.UsersList = new SelectList(await usersListQuery.ToListAsync(), "Id", "FullName");
 
             return View(items);
         }
@@ -100,24 +110,36 @@ namespace AcxiomCRM.Controllers
 
             if (lead == null) return NotFound();
 
+            var user = await _userManager.GetUserAsync(User);
+            if (user == null || !await _userScopeService.CanAccessRecordAsync(user, lead.AssignedTo))
+            {
+                return Forbid();
+            }
+
             return View(lead);
         }
 
         // GET: Leads/Create
         public async Task<IActionResult> Create()
         {
+            var user = await _userManager.GetUserAsync(User);
             var lead = new Lead
             {
                 LeadCode = "LEAD-" + new Random().Next(1000, 9999),
                 Status = "New",
                 Priority = "Medium",
-                ExpectedValue = 10000
+                ExpectedValue = 10000,
+                AssignedTo = user?.Id
             };
 
-            var user = await _userManager.GetUserAsync(User);
-            lead.AssignedTo = user?.Id;
+            var accessibleUserIds = await _userScopeService.GetAccessibleUserIdsAsync(user!);
+            var usersListQuery = _context.Users.Where(u => u.IsActive);
+            if (accessibleUserIds != null)
+            {
+                usersListQuery = usersListQuery.Where(u => accessibleUserIds.Contains(u.Id));
+            }
 
-            ViewBag.UsersList = new SelectList(await _context.Users.Where(u => u.IsActive).ToListAsync(), "Id", "FullName", lead.AssignedTo);
+            ViewBag.UsersList = new SelectList(await usersListQuery.ToListAsync(), "Id", "FullName", lead.AssignedTo);
             return View(lead);
         }
 
@@ -126,6 +148,9 @@ namespace AcxiomCRM.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> Create(Lead lead)
         {
+            var user = await _userManager.GetUserAsync(User);
+            if (user == null) return Challenge();
+
             if (lead.ExpectedValue <= 0)
             {
                 ModelState.AddModelError("ExpectedValue", "Expected value must be greater than 0.");
@@ -134,12 +159,16 @@ namespace AcxiomCRM.Controllers
             if (ModelState.IsValid)
             {
                 lead.CreatedDate = DateTime.UtcNow;
+                if (string.IsNullOrEmpty(lead.AssignedTo))
+                {
+                    lead.AssignedTo = user.Id;
+                }
+
                 _context.Add(lead);
                 await _context.SaveChangesAsync();
 
-                var user = await _userManager.GetUserAsync(User);
                 await _auditService.LogAsync(
-                    user?.Id,
+                    user.Id,
                     "Create",
                     "Lead",
                     lead.LeadId.ToString(),
@@ -153,7 +182,13 @@ namespace AcxiomCRM.Controllers
                 return RedirectToAction(nameof(Index));
             }
 
-            ViewBag.UsersList = new SelectList(await _context.Users.Where(u => u.IsActive).ToListAsync(), "Id", "FullName", lead.AssignedTo);
+            var accessibleUserIds = await _userScopeService.GetAccessibleUserIdsAsync(user);
+            var usersListQuery = _context.Users.Where(u => u.IsActive);
+            if (accessibleUserIds != null)
+            {
+                usersListQuery = usersListQuery.Where(u => accessibleUserIds.Contains(u.Id));
+            }
+            ViewBag.UsersList = new SelectList(await usersListQuery.ToListAsync(), "Id", "FullName", lead.AssignedTo);
             return View(lead);
         }
 
@@ -165,7 +200,19 @@ namespace AcxiomCRM.Controllers
             var lead = await _context.Leads.FindAsync(id);
             if (lead == null) return NotFound();
 
-            ViewBag.UsersList = new SelectList(await _context.Users.Where(u => u.IsActive).ToListAsync(), "Id", "FullName", lead.AssignedTo);
+            var user = await _userManager.GetUserAsync(User);
+            if (user == null || !await _userScopeService.CanAccessRecordAsync(user, lead.AssignedTo))
+            {
+                return Forbid();
+            }
+
+            var accessibleUserIds = await _userScopeService.GetAccessibleUserIdsAsync(user);
+            var usersListQuery = _context.Users.Where(u => u.IsActive);
+            if (accessibleUserIds != null)
+            {
+                usersListQuery = usersListQuery.Where(u => accessibleUserIds.Contains(u.Id));
+            }
+            ViewBag.UsersList = new SelectList(await usersListQuery.ToListAsync(), "Id", "FullName", lead.AssignedTo);
             return View(lead);
         }
 
@@ -176,6 +223,15 @@ namespace AcxiomCRM.Controllers
         {
             if (id != lead.LeadId) return NotFound();
 
+            var user = await _userManager.GetUserAsync(User);
+            var existing = await _context.Leads.AsNoTracking().FirstOrDefaultAsync(l => l.LeadId == id);
+            if (existing == null) return NotFound();
+
+            if (user == null || !await _userScopeService.CanAccessRecordAsync(user, existing.AssignedTo))
+            {
+                return Forbid();
+            }
+
             if (lead.ExpectedValue <= 0)
             {
                 ModelState.AddModelError("ExpectedValue", "Expected value must be greater than 0.");
@@ -185,16 +241,12 @@ namespace AcxiomCRM.Controllers
             {
                 try
                 {
-                    var existing = await _context.Leads.AsNoTracking().FirstOrDefaultAsync(l => l.LeadId == id);
-                    if (existing == null) return NotFound();
-
                     lead.CreatedDate = existing.CreatedDate;
                     _context.Update(lead);
                     await _context.SaveChangesAsync();
 
-                    var user = await _userManager.GetUserAsync(User);
                     await _auditService.LogAsync(
-                        user?.Id,
+                        user.Id,
                         "Update",
                         "Lead",
                         lead.LeadId.ToString(),
@@ -214,7 +266,13 @@ namespace AcxiomCRM.Controllers
                 }
             }
 
-            ViewBag.UsersList = new SelectList(await _context.Users.Where(u => u.IsActive).ToListAsync(), "Id", "FullName", lead.AssignedTo);
+            var accessibleUserIds = await _userScopeService.GetAccessibleUserIdsAsync(user);
+            var usersListQuery = _context.Users.Where(u => u.IsActive);
+            if (accessibleUserIds != null)
+            {
+                usersListQuery = usersListQuery.Where(u => accessibleUserIds.Contains(u.Id));
+            }
+            ViewBag.UsersList = new SelectList(await usersListQuery.ToListAsync(), "Id", "FullName", lead.AssignedTo);
             return View(lead);
         }
 
@@ -225,6 +283,12 @@ namespace AcxiomCRM.Controllers
 
             var lead = await _context.Leads.FindAsync(id);
             if (lead == null) return NotFound();
+
+            var user = await _userManager.GetUserAsync(User);
+            if (user == null || !await _userScopeService.CanAccessRecordAsync(user, lead.AssignedTo))
+            {
+                return Forbid();
+            }
 
             if (lead.Status == "Converted")
             {
@@ -259,6 +323,12 @@ namespace AcxiomCRM.Controllers
             var lead = await _context.Leads.FindAsync(model.LeadId);
             if (lead == null) return NotFound();
 
+            var user = await _userManager.GetUserAsync(User);
+            if (user == null || !await _userScopeService.CanAccessRecordAsync(user, lead.AssignedTo))
+            {
+                return Forbid();
+            }
+
             if (model.CreateOpportunity && model.OpportunityAmount <= 0)
             {
                 ModelState.AddModelError("OpportunityAmount", "Opportunity Amount must be greater than 0.");
@@ -274,13 +344,11 @@ namespace AcxiomCRM.Controllers
                 return View(model);
             }
 
-            var user = await _userManager.GetUserAsync(User);
             Customer? customer = null;
 
             // 1. Create or link Customer
             if (model.CreateCustomer)
             {
-                // Check if customer already exists by email
                 customer = await _context.Customers.FirstOrDefaultAsync(c => c.Email.ToLower() == lead.Email.ToLower());
                 if (customer == null)
                 {
@@ -293,7 +361,7 @@ namespace AcxiomCRM.Controllers
                         CompanyName = lead.CompanyName,
                         Status = "Active",
                         CreatedDate = DateTime.UtcNow,
-                        CreatedBy = lead.AssignedTo ?? user?.Id,
+                        CreatedBy = lead.AssignedTo ?? user.Id,
                         Notes = $"Converted from Lead {lead.LeadCode}. {model.Notes}"
                     };
                     _context.Customers.Add(customer);
@@ -315,7 +383,7 @@ namespace AcxiomCRM.Controllers
                     ExpectedCloseDate = model.ExpectedCloseDate,
                     Status = "Open",
                     CreatedDate = DateTime.UtcNow,
-                    AssignedTo = lead.AssignedTo ?? user?.Id,
+                    AssignedTo = lead.AssignedTo ?? user.Id,
                     Notes = $"Created via lead conversion. {model.Notes}"
                 };
                 _context.Opportunities.Add(opportunity);
@@ -329,7 +397,7 @@ namespace AcxiomCRM.Controllers
 
             // 4. Record conversion in Audit Log (Section 8: Lead-to-Customer Workflow Step 6)
             await _auditService.LogAsync(
-                user?.Id,
+                user.Id,
                 "Convert",
                 "Lead",
                 lead.LeadId.ToString(),
@@ -354,6 +422,12 @@ namespace AcxiomCRM.Controllers
 
             if (lead == null) return NotFound();
 
+            var user = await _userManager.GetUserAsync(User);
+            if (user == null || !await _userScopeService.CanAccessRecordAsync(user, lead.AssignedTo))
+            {
+                return Forbid();
+            }
+
             return View(lead);
         }
 
@@ -363,28 +437,31 @@ namespace AcxiomCRM.Controllers
         public async Task<IActionResult> DeleteConfirmed(int id)
         {
             var lead = await _context.Leads.FindAsync(id);
-            if (lead != null)
+            if (lead == null) return NotFound();
+
+            var user = await _userManager.GetUserAsync(User);
+            if (user == null || !await _userScopeService.CanAccessRecordAsync(user, lead.AssignedTo))
             {
-                var user = await _userManager.GetUserAsync(User);
-                var oldData = JsonSerializer.Serialize(new { lead.LeadName, lead.Email, lead.Status });
-
-                _context.Leads.Remove(lead);
-                await _context.SaveChangesAsync();
-
-                await _auditService.LogAsync(
-                    user?.Id,
-                    "Delete",
-                    "Lead",
-                    id.ToString(),
-                    oldData,
-                    null,
-                    "Success",
-                    $"Deleted lead {lead.LeadName}",
-                    HttpContext.Connection.RemoteIpAddress?.ToString());
-
-                TempData["SuccessMessage"] = $"Lead '{lead.LeadName}' removed successfully.";
+                return Forbid();
             }
 
+            var oldData = JsonSerializer.Serialize(new { lead.LeadName, lead.Email, lead.Status });
+
+            _context.Leads.Remove(lead);
+            await _context.SaveChangesAsync();
+
+            await _auditService.LogAsync(
+                user.Id,
+                "Delete",
+                "Lead",
+                id.ToString(),
+                oldData,
+                null,
+                "Success",
+                $"Deleted lead {lead.LeadName}",
+                HttpContext.Connection.RemoteIpAddress?.ToString());
+
+            TempData["SuccessMessage"] = $"Lead '{lead.LeadName}' removed successfully.";
             return RedirectToAction(nameof(Index));
         }
     }

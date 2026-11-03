@@ -33,8 +33,6 @@ namespace AcxiomCRM.Data
                 ("sales2@acxiomcrm.com", "Priya Sharma (Sales Executive)", "SalesExecutive", "Sales@12345")
             };
 
-            var userMap = new Dictionary<string, ApplicationUser>();
-
             foreach (var item in usersToCreate)
             {
                 var existing = await userManager.FindByEmailAsync(item.Email);
@@ -55,18 +53,29 @@ namespace AcxiomCRM.Data
                     if (createResult.Succeeded)
                     {
                         await userManager.AddToRoleAsync(user, item.Role);
-                        userMap[item.Role] = user;
                     }
-                }
-                else
-                {
-                    userMap[item.Role] = existing;
                 }
             }
 
+            var managerUser = await userManager.FindByEmailAsync("manager@acxiomcrm.com");
             var salesUser1 = await userManager.FindByEmailAsync("sales1@acxiomcrm.com");
             var salesUser2 = await userManager.FindByEmailAsync("sales2@acxiomcrm.com");
             var adminUser = await userManager.FindByEmailAsync("admin@acxiomcrm.com");
+
+            // Assign Manager hierarchy (sales1 and sales2 belong to manager's team)
+            if (managerUser != null)
+            {
+                if (salesUser1 != null && string.IsNullOrEmpty(salesUser1.ManagerId))
+                {
+                    salesUser1.ManagerId = managerUser.Id;
+                    await userManager.UpdateAsync(salesUser1);
+                }
+                if (salesUser2 != null && string.IsNullOrEmpty(salesUser2.ManagerId))
+                {
+                    salesUser2.ManagerId = managerUser.Id;
+                    await userManager.UpdateAsync(salesUser2);
+                }
+            }
 
             if (salesUser1 == null || adminUser == null) return;
 

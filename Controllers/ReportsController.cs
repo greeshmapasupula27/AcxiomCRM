@@ -13,15 +13,18 @@ namespace AcxiomCRM.Controllers
     {
         private readonly ApplicationDbContext _context;
         private readonly UserManager<ApplicationUser> _userManager;
+        private readonly IUserScopeService _userScopeService;
         private readonly IReportService _reportService;
 
         public ReportsController(
             ApplicationDbContext context,
             UserManager<ApplicationUser> userManager,
+            IUserScopeService userScopeService,
             IReportService reportService)
         {
             _context = context;
             _userManager = userManager;
+            _userScopeService = userScopeService;
             _reportService = reportService;
         }
 
@@ -29,28 +32,54 @@ namespace AcxiomCRM.Controllers
         public async Task<IActionResult> Index()
         {
             var user = await _userManager.GetUserAsync(User);
-            var roles = await _userManager.GetRolesAsync(user!);
+            if (user == null) return Challenge();
+
+            var roles = await _userManager.GetRolesAsync(user);
             ViewBag.IsAdminOrManager = roles.Contains("Admin") || roles.Contains("Manager");
 
-            // Overview summary numbers
-            ViewBag.CustomerCount = await _context.Customers.CountAsync();
-            ViewBag.LeadCount = await _context.Leads.CountAsync();
-            ViewBag.OpportunityCount = await _context.Opportunities.CountAsync();
-            ViewBag.TotalPipeline = await _context.Opportunities.Where(o => o.Status == "Open").SumAsync(o => o.Amount);
-            ViewBag.FollowUpCount = await _context.FollowUps.CountAsync();
-            ViewBag.AuditCount = await _context.AuditLogs.CountAsync();
+            var accessibleUserIds = await _userScopeService.GetAccessibleUserIdsAsync(user);
+
+            IQueryable<Customer> custQ = _context.Customers.AsNoTracking();
+            IQueryable<Lead> leadQ = _context.Leads.AsNoTracking();
+            IQueryable<Opportunity> oppQ = _context.Opportunities.AsNoTracking();
+            IQueryable<FollowUp> fuQ = _context.FollowUps.AsNoTracking();
+
+            if (accessibleUserIds != null)
+            {
+                custQ = custQ.Where(c => c.CreatedBy != null && accessibleUserIds.Contains(c.CreatedBy));
+                leadQ = leadQ.Where(l => l.AssignedTo != null && accessibleUserIds.Contains(l.AssignedTo));
+                oppQ = oppQ.Where(o => o.AssignedTo != null && accessibleUserIds.Contains(o.AssignedTo));
+                fuQ = fuQ.Where(f => f.AssignedTo != null && accessibleUserIds.Contains(f.AssignedTo));
+            }
+
+            ViewBag.CustomerCount = await custQ.CountAsync();
+            ViewBag.LeadCount = await leadQ.CountAsync();
+            ViewBag.OpportunityCount = await oppQ.CountAsync();
+            ViewBag.TotalPipeline = await oppQ.Where(o => o.Status == "Open").SumAsync(o => o.Amount);
+            ViewBag.FollowUpCount = await fuQ.CountAsync();
+            ViewBag.AuditCount = (roles.Contains("Admin") || roles.Contains("Manager")) ? await _context.AuditLogs.CountAsync() : 0;
 
             return View();
         }
 
-        // Pipeline Report
+        // Pipeline Report (PDF Section 4.11 & 11)
         public async Task<IActionResult> Pipeline()
         {
-            var opportunities = await _context.Opportunities
+            var user = await _userManager.GetUserAsync(User);
+            if (user == null) return Challenge();
+
+            var accessibleUserIds = await _userScopeService.GetAccessibleUserIdsAsync(user);
+            IQueryable<Opportunity> query = _context.Opportunities
                 .Include(o => o.Customer)
                 .Include(o => o.AssignedUser)
-                .AsNoTracking()
-                .ToListAsync();
+                .AsNoTracking();
+
+            if (accessibleUserIds != null)
+            {
+                query = query.Where(o => o.AssignedTo != null && accessibleUserIds.Contains(o.AssignedTo));
+            }
+
+            var opportunities = await query.ToListAsync();
 
             var pipelineByStage = opportunities
                 .GroupBy(o => o.Stage)
@@ -67,12 +96,25 @@ namespace AcxiomCRM.Controllers
             return View(opportunities);
         }
 
-        // Conversion Report
+        // Conversion Report (PDF Section 4.11 & 11)
         public async Task<IActionResult> Conversion()
         {
-            var totalLeads = await _context.Leads.CountAsync();
-            var convertedLeads = await _context.Leads.CountAsync(l => l.Status == "Converted");
-            var lostLeads = await _context.Leads.CountAsync(l => l.Status == "Lost");
+            var user = await _userManager.GetUserAsync(User);
+            if (user == null) return Challenge();
+
+            var accessibleUserIds = await _userScopeService.GetAccessibleUserIdsAsync(user);
+            IQueryable<Lead> query = _context.Leads.Include(l => l.AssignedUser).AsNoTracking();
+
+            if (accessibleUserIds != null)
+            {
+                query = query.Where(l => l.AssignedTo != null && accessibleUserIds.Contains(l.AssignedTo));
+            }
+
+            var leads = await query.OrderByDescending(l => l.CreatedDate).ToListAsync();
+
+            var totalLeads = leads.Count;
+            var convertedLeads = leads.Count(l => l.Status == "Converted");
+            var lostLeads = leads.Count(l => l.Status == "Lost");
             var activeLeads = totalLeads - convertedLeads - lostLeads;
 
             ViewBag.TotalLeads = totalLeads;
@@ -81,7 +123,6 @@ namespace AcxiomCRM.Controllers
             ViewBag.ActiveLeads = activeLeads;
             ViewBag.ConversionRate = totalLeads > 0 ? (convertedLeads * 100.0 / totalLeads) : 0;
 
-            var leads = await _context.Leads.Include(l => l.AssignedUser).OrderByDescending(l => l.CreatedDate).ToListAsync();
             return View(leads);
         }
 
@@ -89,10 +130,17 @@ namespace AcxiomCRM.Controllers
         public async Task<IActionResult> ExportCsv(string type)
         {
             var user = await _userManager.GetUserAsync(User);
-            var roles = await _userManager.GetRolesAsync(user!);
+            if (user == null) return Challenge();
+
+            var roles = await _userManager.GetRolesAsync(user);
             var role = roles.FirstOrDefault() ?? "SalesExecutive";
 
-            var csvBytes = await _reportService.GenerateCsvExportAsync(type, role, user!.Id);
+            if (type.ToLower() == "audit" && role != "Admin" && role != "Manager")
+            {
+                return Forbid();
+            }
+
+            var csvBytes = await _reportService.GenerateCsvExportAsync(type, role, user.Id);
             var fileName = $"{type}_Report_{DateTime.UtcNow:yyyyMMdd_HHmmss}.csv";
             return File(csvBytes, "text/csv", fileName);
         }

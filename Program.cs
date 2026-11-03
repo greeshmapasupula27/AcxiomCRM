@@ -7,7 +7,7 @@ using System.Text.Json.Serialization;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Database configuration (SQLite for portability and zero configuration)
+// Database configuration
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection") 
                        ?? "Data Source=AcxiomCRM.db";
 
@@ -36,7 +36,7 @@ builder.Services.AddIdentity<ApplicationUser, IdentityRole>(options =>
 .AddEntityFrameworkStores<ApplicationDbContext>()
 .AddDefaultTokenProviders();
 
-// Cookie configuration
+// Cookie configuration with API 401/403 Handling
 builder.Services.ConfigureApplicationCookie(options =>
 {
     options.Cookie.HttpOnly = true;
@@ -45,15 +45,41 @@ builder.Services.ConfigureApplicationCookie(options =>
     options.LogoutPath = "/Account/Logout";
     options.AccessDeniedPath = "/Account/AccessDenied";
     options.SlidingExpiration = true;
+
+    // Return 401 Unauthorized for API requests instead of redirecting to HTML login page (PDF Section 10.1 & 17.14)
+    options.Events.OnRedirectToLogin = context =>
+    {
+        if (context.Request.Path.StartsWithSegments("/api"))
+        {
+            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            context.Response.ContentType = "application/json";
+            return context.Response.WriteAsync("{\"success\":false,\"message\":\"Unauthorized. Authentication required for API access.\"}");
+        }
+        context.Response.Redirect(context.RedirectUri);
+        return Task.CompletedTask;
+    };
+
+    options.Events.OnRedirectToAccessDenied = context =>
+    {
+        if (context.Request.Path.StartsWithSegments("/api"))
+        {
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            context.Response.ContentType = "application/json";
+            return context.Response.WriteAsync("{\"success\":false,\"message\":\"Forbidden. You do not have permission to access this resource.\"}");
+        }
+        context.Response.Redirect(context.RedirectUri);
+        return Task.CompletedTask;
+    };
 });
 
-// Register Business & Cross-Cutting Services
+// Register Business, Scope, & Cross-Cutting Services
 builder.Services.AddScoped<IAuditService, AuditService>();
 builder.Services.AddScoped<IDashboardService, DashboardService>();
 builder.Services.AddScoped<IReportService, ReportService>();
+builder.Services.AddScoped<IUserScopeService, UserScopeService>();
 builder.Services.AddHttpContextAccessor();
 
-// Anti-Forgery Token Configuration (PDF Section 17.9)
+// Anti-Forgery Token Configuration
 builder.Services.AddAntiforgery(options =>
 {
     options.HeaderName = "X-CSRF-TOKEN";
@@ -85,6 +111,11 @@ using (var scope = app.Services.CreateScope())
 }
 
 // Configure HTTP pipeline
+app.UseForwardedHeaders(new ForwardedHeadersOptions
+{
+    ForwardedHeaders = Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedFor | Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto
+});
+
 if (!app.Environment.IsDevelopment())
 {
     app.UseExceptionHandler("/Home/Error");

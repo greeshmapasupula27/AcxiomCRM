@@ -1,5 +1,5 @@
 # verify_crm.ps1
-param([string]$baseUrl = "http://127.0.0.1:5025")
+param([string]$baseUrl = "http://127.0.0.1:5000")
 
 Write-Host "==========================================================" -ForegroundColor Cyan
 Write-Host " AcxiomCRM Acceptance & Verification Test Suite (PDF 17.19)" -ForegroundColor Cyan
@@ -18,7 +18,7 @@ function Assert-Test($testName, $condition, $details) {
     }
 }
 
-# 1. Unauthenticated Access Protection (Scenario 1)
+# 1. Unauthenticated Web Navigation (Scenario 1)
 try {
     $req = [System.Net.WebRequest]::Create("$baseUrl/Dashboard")
     $req.AllowAutoRedirect = $false
@@ -26,52 +26,75 @@ try {
     $status = [int]$resp.StatusCode
     $loc = $resp.Headers["Location"]
     $resp.Close()
-    Assert-Test "Scenario 1: Protected pages require authentication" ($status -eq 302 -and $loc -like "*/Account/Login*") "Status: $status, Redirect: $loc"
+    Assert-Test "Scenario 1: Protected MVC views redirect to /Account/Login" ($status -eq 302 -and $loc -like "*/Account/Login*") "Status: $status, Redirect: $loc"
 } catch [System.Net.WebException] {
     $resp = $_.Exception.Response
     if ($resp) {
         $status = [int]$resp.StatusCode
         $loc = $resp.Headers["Location"]
         $resp.Close()
-        Assert-Test "Scenario 1: Protected pages require authentication" ($status -eq 302 -and $loc -like "*/Account/Login*") "Status: $status, Redirect: $loc"
+        Assert-Test "Scenario 1: Protected MVC views redirect to /Account/Login" ($status -eq 302 -and $loc -like "*/Account/Login*") "Status: $status, Redirect: $loc"
     } else {
-        Assert-Test "Scenario 1: Protected pages require authentication" $false $_.Exception.Message
+        Assert-Test "Scenario 1: Protected MVC views redirect to /Account/Login" $false $_.Exception.Message
     }
 }
 
-# 2. REST API: GET /api/customers (Scenario 13)
+# 2. REST API Security: Unauthenticated request returns 401 Unauthorized (PDF 10.1 & 17.14)
 try {
-    $custResp = Invoke-RestMethod -Uri "$baseUrl/api/customers" -Method Get
-    Assert-Test "Scenario 13a: GET /api/customers returns valid JSON" ($custResp.success -eq $true -and $custResp.data.Count -gt 0) "Found $($custResp.data.Count) seeded customer(s)"
+    $res = Invoke-WebRequest -Uri "$baseUrl/api/customers" -Method Get -UseBasicParsing
+    Assert-Test "Scenario 13a: Unauthenticated API access blocked" $false "Server returned 200 without auth"
 } catch {
-    Assert-Test "Scenario 13a: GET /api/customers" $false $_.Exception.Message
+    $statusCode = [int]$_.Exception.Response.StatusCode
+    Assert-Test "Scenario 13a: Unauthenticated API access returns 401 Unauthorized" ($statusCode -eq 401) "HTTP Status: $statusCode (Unauthorized as required)"
 }
 
-# 3. REST API: GET /api/leads
+# 3. REST API Authentication: POST /api/auth/login
+$session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
+$loginPayload = @{
+    email = "sales1@acxiomcrm.com"
+    password = "Sales@12345"
+} | ConvertTo-Json
+
 try {
-    $leadsResp = Invoke-RestMethod -Uri "$baseUrl/api/leads" -Method Get
-    Assert-Test "Scenario 13b: GET /api/leads returns valid JSON" ($leadsResp.success -eq $true -and $leadsResp.data.Count -gt 0) "Found $($leadsResp.data.Count) seeded lead(s)"
+    $loginResp = Invoke-RestMethod -Uri "$baseUrl/api/auth/login" -Method Post -Body $loginPayload -ContentType "application/json" -WebSession $session
+    Assert-Test "Scenario 10: Authenticate via POST /api/auth/login" ($loginResp.success -eq $true -and $loginResp.data.email -eq "sales1@acxiomcrm.com") "Logged in user: $($loginResp.data.fullName)"
 } catch {
-    Assert-Test "Scenario 13b: GET /api/leads" $false $_.Exception.Message
+    Assert-Test "Scenario 10: Authenticate via POST /api/auth/login" $false $_.Exception.Message
 }
 
-# 4. REST API: GET /api/opportunities
+# 4. Authenticated REST API: GET /api/customers
 try {
-    $oppResp = Invoke-RestMethod -Uri "$baseUrl/api/opportunities" -Method Get
-    Assert-Test "Scenario 13c: GET /api/opportunities returns valid JSON" ($oppResp.success -eq $true -and $oppResp.data.Count -gt 0) "Found $($oppResp.data.Count) seeded opportunity deal(s)"
+    $custResp = Invoke-RestMethod -Uri "$baseUrl/api/customers" -Method Get -WebSession $session
+    Assert-Test "Scenario 13b: GET /api/customers returns valid JSON" ($custResp.success -eq $true -and $custResp.data.Count -gt 0) "Found $($custResp.data.Count) customer(s)"
 } catch {
-    Assert-Test "Scenario 13c: GET /api/opportunities" $false $_.Exception.Message
+    Assert-Test "Scenario 13b: GET /api/customers" $false $_.Exception.Message
 }
 
-# 5. REST API: GET /api/reports/pipeline
+# 5. Authenticated REST API: GET /api/leads
 try {
-    $pipeResp = Invoke-RestMethod -Uri "$baseUrl/api/reports/pipeline" -Method Get
-    Assert-Test "Scenario 13d: GET /api/reports/pipeline returns valid JSON" ($pipeResp.success -eq $true -and $pipeResp.data.totalOpenPipeline -gt 0) "Total Open Pipeline: `$$($pipeResp.data.totalOpenPipeline)"
+    $leadsResp = Invoke-RestMethod -Uri "$baseUrl/api/leads" -Method Get -WebSession $session
+    Assert-Test "Scenario 13c: GET /api/leads returns valid JSON" ($leadsResp.success -eq $true -and $leadsResp.data.Count -gt 0) "Found $($leadsResp.data.Count) lead(s)"
 } catch {
-    Assert-Test "Scenario 13d: GET /api/reports/pipeline" $false $_.Exception.Message
+    Assert-Test "Scenario 13c: GET /api/leads" $false $_.Exception.Message
 }
 
-# 6. Business Validation: Opportunity Amount <= 0 (Scenario 5)
+# 6. Authenticated REST API: GET /api/opportunities
+try {
+    $oppResp = Invoke-RestMethod -Uri "$baseUrl/api/opportunities" -Method Get -WebSession $session
+    Assert-Test "Scenario 13d: GET /api/opportunities returns valid JSON" ($oppResp.success -eq $true -and $oppResp.data.Count -gt 0) "Found $($oppResp.data.Count) opportunity deal(s)"
+} catch {
+    Assert-Test "Scenario 13d: GET /api/opportunities" $false $_.Exception.Message
+}
+
+# 7. Authenticated REST API: GET /api/reports/pipeline
+try {
+    $pipeResp = Invoke-RestMethod -Uri "$baseUrl/api/reports/pipeline" -Method Get -WebSession $session
+    Assert-Test "Scenario 13e: GET /api/reports/pipeline returns valid JSON" ($pipeResp.success -eq $true -and $pipeResp.data.totalOpenPipeline -gt 0) "Total Open Pipeline: `$$($pipeResp.data.totalOpenPipeline)"
+} catch {
+    Assert-Test "Scenario 13e: GET /api/reports/pipeline" $false $_.Exception.Message
+}
+
+# 8. Business Validation: Opportunity Amount <= 0 (Scenario 5)
 $invalidAmountOpp = @{
     opportunityName = "Invalid Amount Deal"
     amount = 0
@@ -80,14 +103,14 @@ $invalidAmountOpp = @{
 } | ConvertTo-Json
 
 try {
-    $res = Invoke-RestMethod -Uri "$baseUrl/api/opportunities" -Method Post -Body $invalidAmountOpp -ContentType "application/json"
+    $res = Invoke-RestMethod -Uri "$baseUrl/api/opportunities" -Method Post -Body $invalidAmountOpp -ContentType "application/json" -WebSession $session
     Assert-Test "Scenario 5: Opportunity with Amount <= 0 rejected" $false "Server accepted amount = 0"
 } catch {
     $statusCode = [int]$_.Exception.Response.StatusCode
     Assert-Test "Scenario 5: Opportunity with Amount <= 0 rejected" ($statusCode -eq 400) "HTTP Status: $statusCode (Bad Request as expected)"
 }
 
-# 7. Business Validation: Probability > 100 (Scenario 6)
+# 9. Business Validation: Probability > 100 (Scenario 6)
 $invalidProbOpp = @{
     opportunityName = "Invalid Probability Deal"
     amount = 50000
@@ -96,14 +119,14 @@ $invalidProbOpp = @{
 } | ConvertTo-Json
 
 try {
-    $res = Invoke-RestMethod -Uri "$baseUrl/api/opportunities" -Method Post -Body $invalidProbOpp -ContentType "application/json"
+    $res = Invoke-RestMethod -Uri "$baseUrl/api/opportunities" -Method Post -Body $invalidProbOpp -ContentType "application/json" -WebSession $session
     Assert-Test "Scenario 6: Opportunity with Probability > 100 rejected" $false "Server accepted probability > 100"
 } catch {
     $statusCode = [int]$_.Exception.Response.StatusCode
     Assert-Test "Scenario 6: Opportunity with Probability > 100 rejected" ($statusCode -eq 400) "HTTP Status: $statusCode (Bad Request as expected)"
 }
 
-# 8. Business Validation: Expected Close Date in Past (Scenario 7)
+# 10. Business Validation: Expected Close Date in Past (Scenario 7)
 $pastCloseOpp = @{
     opportunityName = "Past Close Date Deal"
     amount = 50000
@@ -113,14 +136,14 @@ $pastCloseOpp = @{
 } | ConvertTo-Json
 
 try {
-    $res = Invoke-RestMethod -Uri "$baseUrl/api/opportunities" -Method Post -Body $pastCloseOpp -ContentType "application/json"
+    $res = Invoke-RestMethod -Uri "$baseUrl/api/opportunities" -Method Post -Body $pastCloseOpp -ContentType "application/json" -WebSession $session
     Assert-Test "Scenario 7: Opportunity with past Expected Close Date rejected" $false "Server accepted past date"
 } catch {
     $statusCode = [int]$_.Exception.Response.StatusCode
     Assert-Test "Scenario 7: Opportunity with past Expected Close Date rejected" ($statusCode -eq 400) "HTTP Status: $statusCode (Bad Request as expected)"
 }
 
-# 9. Business Validation: Follow-Up Date in Past for New Activity (Scenario 8)
+# 11. Business Validation: Follow-Up Date in Past for New Activity (Scenario 8)
 $pastFollowUp = @{
     subject = "Follow-up yesterday"
     followUpType = "Call"
@@ -129,14 +152,14 @@ $pastFollowUp = @{
 } | ConvertTo-Json
 
 try {
-    $res = Invoke-RestMethod -Uri "$baseUrl/api/followups" -Method Post -Body $pastFollowUp -ContentType "application/json"
+    $res = Invoke-RestMethod -Uri "$baseUrl/api/followups" -Method Post -Body $pastFollowUp -ContentType "application/json" -WebSession $session
     Assert-Test "Scenario 8: Follow-up dated before today rejected" $false "Server accepted past follow-up"
 } catch {
     $statusCode = [int]$_.Exception.Response.StatusCode
     Assert-Test "Scenario 8: Follow-up dated before today rejected" ($statusCode -eq 400) "HTTP Status: $statusCode (Bad Request as expected)"
 }
 
-# 10. Business Validation: Duplicate Customer Email (Scenario 4)
+# 12. Business Validation: Duplicate Customer Email (Scenario 4)
 $dupCustomer = @{
     customerName = "Duplicate Test Corp"
     email = "contact@apextech.com"
@@ -144,14 +167,14 @@ $dupCustomer = @{
 } | ConvertTo-Json
 
 try {
-    $res = Invoke-RestMethod -Uri "$baseUrl/api/customers" -Method Post -Body $dupCustomer -ContentType "application/json"
+    $res = Invoke-RestMethod -Uri "$baseUrl/api/customers" -Method Post -Body $dupCustomer -ContentType "application/json" -WebSession $session
     Assert-Test "Scenario 4: Duplicate Customer Email rejected" $false "Server accepted duplicate customer email"
 } catch {
     $statusCode = [int]$_.Exception.Response.StatusCode
     Assert-Test "Scenario 4: Duplicate Customer Email rejected" ($statusCode -eq 409) "HTTP Status: $statusCode (Conflict as expected)"
 }
 
-# 11. Valid Opportunity Creation via API & Derive Weighted Pipeline
+# 13. Valid Opportunity Creation via API & Derive Weighted Pipeline (Amount * Probability / 100)
 $validOpp = @{
     opportunityName = "Acxiom Cloud Analytics Expansion"
     amount = 80000
@@ -161,7 +184,7 @@ $validOpp = @{
 } | ConvertTo-Json
 
 try {
-    $res = Invoke-RestMethod -Uri "$baseUrl/api/opportunities" -Method Post -Body $validOpp -ContentType "application/json"
+    $res = Invoke-RestMethod -Uri "$baseUrl/api/opportunities" -Method Post -Body $validOpp -ContentType "application/json" -WebSession $session
     $weighted = $res.data.weightedAmount
     Assert-Test "Valid Opportunity Creation & Weighted Calculation" ($res.success -eq $true -and $weighted -eq 40000) "Created ID $($res.data.opportunityId), Weighted: `$$weighted"
 } catch {

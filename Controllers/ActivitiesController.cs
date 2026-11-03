@@ -15,12 +15,18 @@ namespace AcxiomCRM.Controllers
     {
         private readonly ApplicationDbContext _context;
         private readonly UserManager<ApplicationUser> _userManager;
+        private readonly IUserScopeService _userScopeService;
         private readonly IAuditService _auditService;
 
-        public ActivitiesController(ApplicationDbContext context, UserManager<ApplicationUser> userManager, IAuditService auditService)
+        public ActivitiesController(
+            ApplicationDbContext context,
+            UserManager<ApplicationUser> userManager,
+            IUserScopeService userScopeService,
+            IAuditService auditService)
         {
             _context = context;
             _userManager = userManager;
+            _userScopeService = userScopeService;
             _auditService = auditService;
         }
 
@@ -29,17 +35,16 @@ namespace AcxiomCRM.Controllers
         {
             var user = await _userManager.GetUserAsync(User);
             if (user == null) return Challenge();
-            var roles = await _userManager.GetRolesAsync(user);
-            var isSales = roles.Contains("SalesExecutive") && !roles.Contains("Admin") && !roles.Contains("Manager");
 
+            var accessibleUserIds = await _userScopeService.GetAccessibleUserIdsAsync(user);
             IQueryable<Activity> query = _context.Activities
                 .Include(a => a.Customer)
                 .Include(a => a.Lead)
                 .Include(a => a.AssignedUser);
 
-            if (isSales)
+            if (accessibleUserIds != null)
             {
-                query = query.Where(a => a.AssignedTo == user.Id);
+                query = query.Where(a => a.AssignedTo != null && accessibleUserIds.Contains(a.AssignedTo));
             }
 
             if (!string.IsNullOrWhiteSpace(type))
@@ -71,7 +76,12 @@ namespace AcxiomCRM.Controllers
             ViewBag.TotalPages = (int)Math.Ceiling(totalCount / (double)pageSize);
             ViewBag.TotalCount = totalCount;
 
-            ViewBag.UsersList = new SelectList(await _context.Users.Where(u => u.IsActive).ToListAsync(), "Id", "FullName");
+            var usersListQuery = _context.Users.Where(u => u.IsActive);
+            if (accessibleUserIds != null)
+            {
+                usersListQuery = usersListQuery.Where(u => accessibleUserIds.Contains(u.Id));
+            }
+            ViewBag.UsersList = new SelectList(await usersListQuery.ToListAsync(), "Id", "FullName");
 
             return View(items);
         }
@@ -79,17 +89,16 @@ namespace AcxiomCRM.Controllers
         // GET: Activities/Create
         public async Task<IActionResult> Create(int? customerId, int? leadId)
         {
+            var user = await _userManager.GetUserAsync(User);
             var act = new Activity
             {
                 ActivityType = "Call",
                 ActivityDate = DateTime.UtcNow,
                 Status = "Completed",
                 CustomerId = customerId,
-                LeadId = leadId
+                LeadId = leadId,
+                AssignedTo = user?.Id
             };
-
-            var user = await _userManager.GetUserAsync(User);
-            act.AssignedTo = user?.Id;
 
             await PopulateDropDownsAsync(act);
             return View(act);
@@ -100,15 +109,22 @@ namespace AcxiomCRM.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> Create(Activity activity)
         {
+            var user = await _userManager.GetUserAsync(User);
+            if (user == null) return Challenge();
+
             if (ModelState.IsValid)
             {
+                if (string.IsNullOrEmpty(activity.AssignedTo))
+                {
+                    activity.AssignedTo = user.Id;
+                }
+
                 activity.CreatedDate = DateTime.UtcNow;
                 _context.Add(activity);
                 await _context.SaveChangesAsync();
 
-                var user = await _userManager.GetUserAsync(User);
                 await _auditService.LogAsync(
-                    user?.Id,
+                    user.Id,
                     "Create",
                     "Activity",
                     activity.ActivityId.ToString(),
@@ -128,9 +144,23 @@ namespace AcxiomCRM.Controllers
 
         private async Task PopulateDropDownsAsync(Activity act)
         {
-            ViewBag.CustomersList = new SelectList(await _context.Customers.OrderBy(c => c.CustomerName).ToListAsync(), "CustomerId", "CustomerName", act.CustomerId);
-            ViewBag.LeadsList = new SelectList(await _context.Leads.OrderBy(l => l.LeadName).ToListAsync(), "LeadId", "LeadName", act.LeadId);
-            ViewBag.UsersList = new SelectList(await _context.Users.Where(u => u.IsActive).ToListAsync(), "Id", "FullName", act.AssignedTo);
+            var user = await _userManager.GetUserAsync(User);
+            var accessibleUserIds = user != null ? await _userScopeService.GetAccessibleUserIdsAsync(user) : null;
+
+            IQueryable<Customer> custQuery = _context.Customers;
+            IQueryable<Lead> leadQuery = _context.Leads;
+            IQueryable<ApplicationUser> userQuery = _context.Users.Where(u => u.IsActive);
+
+            if (accessibleUserIds != null)
+            {
+                custQuery = custQuery.Where(c => c.CreatedBy != null && accessibleUserIds.Contains(c.CreatedBy));
+                leadQuery = leadQuery.Where(l => l.AssignedTo != null && accessibleUserIds.Contains(l.AssignedTo));
+                userQuery = userQuery.Where(u => accessibleUserIds.Contains(u.Id));
+            }
+
+            ViewBag.CustomersList = new SelectList(await custQuery.OrderBy(c => c.CustomerName).ToListAsync(), "CustomerId", "CustomerName", act.CustomerId);
+            ViewBag.LeadsList = new SelectList(await leadQuery.OrderBy(l => l.LeadName).ToListAsync(), "LeadId", "LeadName", act.LeadId);
+            ViewBag.UsersList = new SelectList(await userQuery.ToListAsync(), "Id", "FullName", act.AssignedTo);
         }
     }
 }

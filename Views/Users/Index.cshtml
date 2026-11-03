@@ -65,6 +65,9 @@
                         <td class="small text-muted">@u.CreatedDate.ToString("yyyy-MM-dd")</td>
                         <td class="text-end">
                             <div class="btn-group btn-group-sm">
+                                <a asp-action="EditRole" asp-route-id="@u.Id" class="btn btn-outline-primary" title="Change Role Scope">
+                                    <i class="bi bi-shield-lock"></i> Role
+                                </a>
                                 @if (u.IsLockedOut || u.AccessFailedCount > 0)
                                 {
                                     <form asp-action="Unlock" asp-route-id="@u.Id" method="post" class="d-inline">

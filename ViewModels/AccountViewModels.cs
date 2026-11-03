@@ -39,9 +39,25 @@ namespace AcxiomCRM.ViewModels
         [Compare("Password", ErrorMessage = "The password and confirmation password do not match.")]
         public string ConfirmPassword { get; set; } = string.Empty;
 
+        // Note: For public self-registration, role is always enforced as SalesExecutive on server.
+        // Admins can select roles when provisioning users in User Management.
+        public string Role { get; set; } = "SalesExecutive";
+    }
+
+    public class UserEditRoleViewModel
+    {
+        [Required]
+        public string UserId { get; set; } = string.Empty;
+        public string UserEmail { get; set; } = string.Empty;
+        public string FullName { get; set; } = string.Empty;
+
         [Required(ErrorMessage = "Role is required.")]
-        [Display(Name = "Assigned Role")]
-        public string Role { get; set; } = "SalesExecutive"; // Admin, Manager, SalesExecutive
+        [Display(Name = "Role Scope")]
+        public string CurrentRole { get; set; } = string.Empty;
+
+        [Required(ErrorMessage = "New role is required.")]
+        [Display(Name = "New Role")]
+        public string NewRole { get; set; } = "SalesExecutive";
     }
 
     public class ResetPasswordAdminViewModel

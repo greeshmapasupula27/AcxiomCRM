@@ -2,6 +2,8 @@ using AcxiomCRM.Data;
 using AcxiomCRM.DTOs;
 using AcxiomCRM.Models;
 using AcxiomCRM.Services;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -9,14 +11,23 @@ namespace AcxiomCRM.Controllers.Api
 {
     [Route("api/customers")]
     [ApiController]
+    [Authorize] // PDF Section 10.1 & 17.14: Protected endpoint requires authentication
     public class CustomersApiController : ControllerBase
     {
         private readonly ApplicationDbContext _context;
+        private readonly UserManager<ApplicationUser> _userManager;
+        private readonly IUserScopeService _userScopeService;
         private readonly IAuditService _auditService;
 
-        public CustomersApiController(ApplicationDbContext context, IAuditService auditService)
+        public CustomersApiController(
+            ApplicationDbContext context,
+            UserManager<ApplicationUser> userManager,
+            IUserScopeService userScopeService,
+            IAuditService auditService)
         {
             _context = context;
+            _userManager = userManager;
+            _userScopeService = userScopeService;
             _auditService = auditService;
         }
 
@@ -24,7 +35,17 @@ namespace AcxiomCRM.Controllers.Api
         [HttpGet]
         public async Task<ActionResult<ApiResponse<IEnumerable<CustomerDto>>>> GetCustomers([FromQuery] string? search)
         {
-            var query = _context.Customers.AsNoTracking();
+            var user = await _userManager.GetUserAsync(User);
+            if (user == null) return Unauthorized();
+
+            var accessibleUserIds = await _userScopeService.GetAccessibleUserIdsAsync(user);
+            IQueryable<Customer> query = _context.Customers.AsNoTracking();
+
+            // Role and Team scoping (PDF Section 7 & 17.10)
+            if (accessibleUserIds != null)
+            {
+                query = query.Where(c => c.CreatedBy != null && accessibleUserIds.Contains(c.CreatedBy));
+            }
 
             if (!string.IsNullOrWhiteSpace(search))
             {
@@ -63,14 +84,18 @@ namespace AcxiomCRM.Controllers.Api
         [HttpGet("{id}")]
         public async Task<ActionResult<ApiResponse<CustomerDto>>> GetCustomer(int id)
         {
+            var user = await _userManager.GetUserAsync(User);
+            if (user == null) return Unauthorized();
+
             var c = await _context.Customers.FindAsync(id);
             if (c == null)
             {
-                return NotFound(new ApiResponse<CustomerDto>
-                {
-                    Success = false,
-                    Message = $"Customer with ID {id} not found."
-                });
+                return NotFound(new ApiResponse<CustomerDto> { Success = false, Message = $"Customer with ID {id} not found." });
+            }
+
+            if (!await _userScopeService.CanAccessRecordAsync(user, c.CreatedBy))
+            {
+                return Forbid();
             }
 
             var dto = new CustomerDto
@@ -97,6 +122,9 @@ namespace AcxiomCRM.Controllers.Api
         [HttpPost]
         public async Task<ActionResult<ApiResponse<CustomerDto>>> CreateCustomer([FromBody] CustomerDto dto)
         {
+            var user = await _userManager.GetUserAsync(User);
+            if (user == null) return Unauthorized();
+
             if (!ModelState.IsValid)
             {
                 var errors = ModelState.Values.SelectMany(v => v.Errors).Select(e => e.ErrorMessage).ToList();
@@ -127,6 +155,7 @@ namespace AcxiomCRM.Controllers.Api
                 State = dto.State,
                 Status = string.IsNullOrEmpty(dto.Status) ? "Active" : dto.Status,
                 Notes = dto.Notes,
+                CreatedBy = user.Id, // Assign authenticated user
                 CreatedDate = DateTime.UtcNow
             };
 
@@ -136,8 +165,9 @@ namespace AcxiomCRM.Controllers.Api
             dto.CustomerId = customer.CustomerId;
             dto.CustomerCode = customer.CustomerCode;
             dto.CreatedDate = customer.CreatedDate;
+            dto.CreatedBy = customer.CreatedBy;
 
-            await _auditService.LogAsync(null, "Create", "Customer", customer.CustomerId.ToString(), null, dto.CustomerName, "Success", "Created via REST API", HttpContext.Connection.RemoteIpAddress?.ToString());
+            await _auditService.LogAsync(user.Id, "Create", "Customer", customer.CustomerId.ToString(), null, dto.CustomerName, "Success", "Created via REST API", HttpContext.Connection.RemoteIpAddress?.ToString());
 
             return CreatedAtAction(nameof(GetCustomer), new { id = customer.CustomerId }, new ApiResponse<CustomerDto>
             {
@@ -151,6 +181,9 @@ namespace AcxiomCRM.Controllers.Api
         [HttpPut("{id}")]
         public async Task<ActionResult<ApiResponse<CustomerDto>>> UpdateCustomer(int id, [FromBody] CustomerDto dto)
         {
+            var user = await _userManager.GetUserAsync(User);
+            if (user == null) return Unauthorized();
+
             if (!ModelState.IsValid)
             {
                 var errors = ModelState.Values.SelectMany(v => v.Errors).Select(e => e.ErrorMessage).ToList();
@@ -161,6 +194,11 @@ namespace AcxiomCRM.Controllers.Api
             if (customer == null)
             {
                 return NotFound(new ApiResponse<CustomerDto> { Success = false, Message = $"Customer with ID {id} not found." });
+            }
+
+            if (!await _userScopeService.CanAccessRecordAsync(user, customer.CreatedBy))
+            {
+                return Forbid();
             }
 
             // Check email & phone uniqueness excluding current
@@ -187,7 +225,7 @@ namespace AcxiomCRM.Controllers.Api
 
             await _context.SaveChangesAsync();
 
-            await _auditService.LogAsync(null, "Update", "Customer", id.ToString(), null, dto.CustomerName, "Success", "Updated via REST API", HttpContext.Connection.RemoteIpAddress?.ToString());
+            await _auditService.LogAsync(user.Id, "Update", "Customer", id.ToString(), null, dto.CustomerName, "Success", "Updated via REST API", HttpContext.Connection.RemoteIpAddress?.ToString());
 
             dto.CustomerId = id;
             return Ok(new ApiResponse<CustomerDto> { Success = true, Message = "Customer updated successfully.", Data = dto });
@@ -197,16 +235,24 @@ namespace AcxiomCRM.Controllers.Api
         [HttpDelete("{id}")]
         public async Task<ActionResult<ApiResponse<bool>>> DeleteCustomer(int id)
         {
+            var user = await _userManager.GetUserAsync(User);
+            if (user == null) return Unauthorized();
+
             var customer = await _context.Customers.FindAsync(id);
             if (customer == null)
             {
                 return NotFound(new ApiResponse<bool> { Success = false, Message = $"Customer with ID {id} not found." });
             }
 
+            if (!await _userScopeService.CanAccessRecordAsync(user, customer.CreatedBy))
+            {
+                return Forbid();
+            }
+
             _context.Customers.Remove(customer);
             await _context.SaveChangesAsync();
 
-            await _auditService.LogAsync(null, "Delete", "Customer", id.ToString(), customer.CustomerName, null, "Success", "Deleted via REST API", HttpContext.Connection.RemoteIpAddress?.ToString());
+            await _auditService.LogAsync(user.Id, "Delete", "Customer", id.ToString(), customer.CustomerName, null, "Success", "Deleted via REST API", HttpContext.Connection.RemoteIpAddress?.ToString());
 
             return Ok(new ApiResponse<bool> { Success = true, Message = "Customer deleted successfully.", Data = true });
         }

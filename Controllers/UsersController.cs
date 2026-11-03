@@ -152,6 +152,74 @@ namespace AcxiomCRM.Controllers
             return RedirectToAction(nameof(Index));
         }
 
+        // GET: Users/EditRole/5
+        public async Task<IActionResult> EditRole(string id)
+        {
+            var user = await _userManager.FindByIdAsync(id);
+            if (user == null) return NotFound();
+
+            var roles = await _userManager.GetRolesAsync(user);
+            var currentRole = roles.FirstOrDefault() ?? user.PrimaryRole;
+
+            return View(new UserEditRoleViewModel
+            {
+                UserId = user.Id,
+                UserEmail = user.Email ?? "",
+                FullName = user.FullName,
+                CurrentRole = currentRole,
+                NewRole = currentRole
+            });
+        }
+
+        // POST: Users/EditRole/5
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> EditRole(UserEditRoleViewModel model)
+        {
+            if (!ModelState.IsValid) return View(model);
+
+            var user = await _userManager.FindByIdAsync(model.UserId);
+            if (user == null) return NotFound();
+
+            var currentUserId = _userManager.GetUserId(User);
+            if (user.Id == currentUserId && model.NewRole != "Admin")
+            {
+                ModelState.AddModelError(string.Empty, "You cannot remove the Admin role from your own current logged-in account.");
+                return View(model);
+            }
+
+            var currentRoles = await _userManager.GetRolesAsync(user);
+            var oldRole = currentRoles.FirstOrDefault() ?? user.PrimaryRole;
+
+            if (oldRole != model.NewRole)
+            {
+                await _userManager.RemoveFromRolesAsync(user, currentRoles);
+                if (!await _roleManager.RoleExistsAsync(model.NewRole))
+                {
+                    await _roleManager.CreateAsync(new IdentityRole(model.NewRole));
+                }
+                await _userManager.AddToRoleAsync(user, model.NewRole);
+
+                user.PrimaryRole = model.NewRole;
+                await _userManager.UpdateAsync(user);
+
+                await _auditService.LogAsync(
+                    currentUserId,
+                    "Role Change",
+                    "User",
+                    user.Id,
+                    $"Role: {oldRole}",
+                    $"Role: {model.NewRole}",
+                    "Success",
+                    $"Admin changed role of user {user.Email} from {oldRole} to {model.NewRole}",
+                    HttpContext.Connection.RemoteIpAddress?.ToString());
+
+                TempData["SuccessMessage"] = $"Role for {user.FullName} updated to {model.NewRole}.";
+            }
+
+            return RedirectToAction(nameof(Index));
+        }
+
         // POST: Users/Unlock/5
         [HttpPost]
         [ValidateAntiForgeryToken]

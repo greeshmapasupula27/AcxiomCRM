@@ -2,6 +2,8 @@ using AcxiomCRM.Data;
 using AcxiomCRM.DTOs;
 using AcxiomCRM.Models;
 using AcxiomCRM.Services;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -9,14 +11,23 @@ namespace AcxiomCRM.Controllers.Api
 {
     [Route("api/followups")]
     [ApiController]
+    [Authorize] // PDF Section 10.1 & 17.14
     public class FollowUpsApiController : ControllerBase
     {
         private readonly ApplicationDbContext _context;
+        private readonly UserManager<ApplicationUser> _userManager;
+        private readonly IUserScopeService _userScopeService;
         private readonly IAuditService _auditService;
 
-        public FollowUpsApiController(ApplicationDbContext context, IAuditService auditService)
+        public FollowUpsApiController(
+            ApplicationDbContext context,
+            UserManager<ApplicationUser> userManager,
+            IUserScopeService userScopeService,
+            IAuditService auditService)
         {
             _context = context;
+            _userManager = userManager;
+            _userScopeService = userScopeService;
             _auditService = auditService;
         }
 
@@ -24,7 +35,16 @@ namespace AcxiomCRM.Controllers.Api
         [HttpGet]
         public async Task<ActionResult<ApiResponse<IEnumerable<FollowUpDto>>>> GetFollowUps([FromQuery] string? status)
         {
-            var query = _context.FollowUps.AsNoTracking();
+            var user = await _userManager.GetUserAsync(User);
+            if (user == null) return Unauthorized();
+
+            var accessibleUserIds = await _userScopeService.GetAccessibleUserIdsAsync(user);
+            IQueryable<FollowUp> query = _context.FollowUps.AsNoTracking();
+
+            if (accessibleUserIds != null)
+            {
+                query = query.Where(f => f.AssignedTo != null && accessibleUserIds.Contains(f.AssignedTo));
+            }
 
             if (!string.IsNullOrWhiteSpace(status))
             {
@@ -58,6 +78,9 @@ namespace AcxiomCRM.Controllers.Api
         [HttpPost]
         public async Task<ActionResult<ApiResponse<FollowUpDto>>> CreateFollowUp([FromBody] FollowUpDto dto)
         {
+            var user = await _userManager.GetUserAsync(User);
+            if (user == null) return Unauthorized();
+
             if (dto.Status == "Planned" && dto.FollowUpDate.Date < DateTime.UtcNow.Date)
             {
                 ModelState.AddModelError("FollowUpDate", "Follow-up date cannot be earlier than today.");
@@ -79,7 +102,7 @@ namespace AcxiomCRM.Controllers.Api
                 Subject = dto.Subject,
                 Remarks = dto.Remarks,
                 Status = string.IsNullOrEmpty(dto.Status) ? "Planned" : dto.Status,
-                AssignedTo = dto.AssignedTo,
+                AssignedTo = string.IsNullOrEmpty(dto.AssignedTo) ? user.Id : dto.AssignedTo,
                 CreatedDate = DateTime.UtcNow
             };
 
@@ -88,8 +111,9 @@ namespace AcxiomCRM.Controllers.Api
 
             dto.FollowUpId = fu.FollowUpId;
             dto.CreatedDate = fu.CreatedDate;
+            dto.AssignedTo = fu.AssignedTo;
 
-            await _auditService.LogAsync(null, "Create", "FollowUp", fu.FollowUpId.ToString(), null, dto.Subject, "Success", "Created via REST API", HttpContext.Connection.RemoteIpAddress?.ToString());
+            await _auditService.LogAsync(user.Id, "Create", "FollowUp", fu.FollowUpId.ToString(), null, dto.Subject, "Success", "Created via REST API", HttpContext.Connection.RemoteIpAddress?.ToString());
 
             return StatusCode(201, new ApiResponse<FollowUpDto>
             {
@@ -102,20 +126,39 @@ namespace AcxiomCRM.Controllers.Api
 
     [Route("api/reports")]
     [ApiController]
+    [Authorize] // PDF Section 10.1 & 17.14
     public class ReportsApiController : ControllerBase
     {
         private readonly ApplicationDbContext _context;
+        private readonly UserManager<ApplicationUser> _userManager;
+        private readonly IUserScopeService _userScopeService;
 
-        public ReportsApiController(ApplicationDbContext context)
+        public ReportsApiController(
+            ApplicationDbContext context,
+            UserManager<ApplicationUser> userManager,
+            IUserScopeService userScopeService)
         {
             _context = context;
+            _userManager = userManager;
+            _userScopeService = userScopeService;
         }
 
-        // GET: api/reports/pipeline (Section 10 & 17.14)
+        // GET: api/reports/pipeline (PDF Section 10 & 17.14)
         [HttpGet("pipeline")]
         public async Task<ActionResult<ApiResponse<object>>> GetPipelineReport()
         {
-            var opportunities = await _context.Opportunities.AsNoTracking().ToListAsync();
+            var user = await _userManager.GetUserAsync(User);
+            if (user == null) return Unauthorized();
+
+            var accessibleUserIds = await _userScopeService.GetAccessibleUserIdsAsync(user);
+            IQueryable<Opportunity> query = _context.Opportunities.AsNoTracking();
+
+            if (accessibleUserIds != null)
+            {
+                query = query.Where(o => o.AssignedTo != null && accessibleUserIds.Contains(o.AssignedTo));
+            }
+
+            var opportunities = await query.ToListAsync();
 
             var stageData = opportunities
                 .GroupBy(o => o.Stage)
