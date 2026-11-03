@@ -112,13 +112,50 @@ namespace AcxiomCRM.Controllers
             var user = await _userManager.GetUserAsync(User);
             if (user == null) return Challenge();
 
+            // Validate Customer accessibility if linked
+            if (activity.CustomerId.HasValue)
+            {
+                var customer = await _context.Customers.FindAsync(activity.CustomerId.Value);
+                if (customer == null || !await _userScopeService.CanAccessRecordAsync(user, customer.CreatedBy))
+                {
+                    ModelState.AddModelError("CustomerId", "Selected Customer is invalid or not accessible.");
+                }
+            }
+
+            // Validate Lead accessibility if linked
+            if (activity.LeadId.HasValue)
+            {
+                var lead = await _context.Leads.FindAsync(activity.LeadId.Value);
+                if (lead == null || !await _userScopeService.CanAccessRecordAsync(user, lead.AssignedTo))
+                {
+                    ModelState.AddModelError("LeadId", "Selected Lead is invalid or not accessible.");
+                }
+            }
+
+            var roles = await _userManager.GetRolesAsync(user);
+            if (roles.Contains("SalesExecutive"))
+            {
+                activity.AssignedTo = user.Id;
+            }
+            else if (roles.Contains("Manager"))
+            {
+                if (string.IsNullOrEmpty(activity.AssignedTo)) activity.AssignedTo = user.Id;
+                else if (!await _userScopeService.CanAssignToUserAsync(user, activity.AssignedTo))
+                {
+                    ModelState.AddModelError("AssignedTo", "Managers can only assign activities to themselves or direct team members.");
+                }
+            }
+            else
+            {
+                if (string.IsNullOrEmpty(activity.AssignedTo)) activity.AssignedTo = user.Id;
+                else if (!await _userScopeService.CanAssignToUserAsync(user, activity.AssignedTo))
+                {
+                    ModelState.AddModelError("AssignedTo", "Assigned user is invalid or inactive.");
+                }
+            }
+
             if (ModelState.IsValid)
             {
-                if (string.IsNullOrEmpty(activity.AssignedTo))
-                {
-                    activity.AssignedTo = user.Id;
-                }
-
                 activity.CreatedDate = DateTime.UtcNow;
                 _context.Add(activity);
                 await _context.SaveChangesAsync();

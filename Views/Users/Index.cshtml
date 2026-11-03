@@ -20,6 +20,7 @@
                 <tr>
                     <th>User Details</th>
                     <th>Role Scope</th>
+                    <th>Reporting Manager</th>
                     <th>Account Status</th>
                     <th>Lockout Security</th>
                     <th>Failed Logins</th>
@@ -39,6 +40,18 @@
                             <span class="badge @(u.Role == "Admin" ? "badge-role-admin" : u.Role == "Manager" ? "badge-role-manager" : "badge-role-sales")">
                                 @u.Role
                             </span>
+                        </td>
+                        <td>
+                            @if (!string.IsNullOrEmpty(u.ManagerName))
+                            {
+                                <span class="badge bg-light text-dark border">
+                                    <i class="bi bi-person-badge me-1"></i>@u.ManagerName
+                                </span>
+                            }
+                            else
+                            {
+                                <span class="text-muted small">—</span>
+                            }
                         </td>
                         <td>
                             <span class="badge @(u.IsActive ? "bg-success-subtle text-success border border-success-subtle" : "bg-danger-subtle text-danger border border-danger-subtle")">

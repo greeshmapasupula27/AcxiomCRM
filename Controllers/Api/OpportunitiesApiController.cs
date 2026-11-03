@@ -145,6 +145,74 @@ namespace AcxiomCRM.Controllers.Api
                 return BadRequest(new ApiResponse<OpportunityDto> { Success = false, Message = "Validation failed.", Errors = errors });
             }
 
+            // Verify Customer ownership scope if linked
+            if (dto.CustomerId.HasValue)
+            {
+                var customer = await _context.Customers.FindAsync(dto.CustomerId.Value);
+                if (customer == null || !await _userScopeService.CanAccessRecordAsync(user, customer.CreatedBy))
+                {
+                    return StatusCode(StatusCodes.Status403Forbidden, new ApiResponse<OpportunityDto>
+                    {
+                        Success = false,
+                        Message = "Selected Customer is invalid or not accessible."
+                    });
+                }
+            }
+
+            // Verify Lead ownership scope if linked
+            if (dto.LeadId.HasValue)
+            {
+                var lead = await _context.Leads.FindAsync(dto.LeadId.Value);
+                if (lead == null || !await _userScopeService.CanAccessRecordAsync(user, lead.AssignedTo))
+                {
+                    return StatusCode(StatusCodes.Status403Forbidden, new ApiResponse<OpportunityDto>
+                    {
+                        Success = false,
+                        Message = "Selected Lead is invalid or not accessible."
+                    });
+                }
+            }
+
+            var roles = await _userManager.GetRolesAsync(user);
+            string finalAssignedTo;
+
+            if (roles.Contains("SalesExecutive"))
+            {
+                if (!string.IsNullOrEmpty(dto.AssignedTo) && dto.AssignedTo != user.Id)
+                {
+                    return StatusCode(StatusCodes.Status403Forbidden, new ApiResponse<OpportunityDto>
+                    {
+                        Success = false,
+                        Message = "Sales Executives can only assign records to themselves."
+                    });
+                }
+                finalAssignedTo = user.Id;
+            }
+            else if (roles.Contains("Manager"))
+            {
+                finalAssignedTo = string.IsNullOrEmpty(dto.AssignedTo) ? user.Id : dto.AssignedTo;
+                if (!await _userScopeService.CanAssignToUserAsync(user, finalAssignedTo))
+                {
+                    return StatusCode(StatusCodes.Status403Forbidden, new ApiResponse<OpportunityDto>
+                    {
+                        Success = false,
+                        Message = "Managers can only assign records to themselves or direct team members."
+                    });
+                }
+            }
+            else
+            {
+                finalAssignedTo = string.IsNullOrEmpty(dto.AssignedTo) ? user.Id : dto.AssignedTo;
+                if (!await _userScopeService.CanAssignToUserAsync(user, finalAssignedTo))
+                {
+                    return BadRequest(new ApiResponse<OpportunityDto>
+                    {
+                        Success = false,
+                        Message = "Assigned user is invalid or inactive."
+                    });
+                }
+            }
+
             var opp = new Opportunity
             {
                 OpportunityName = dto.OpportunityName,
@@ -155,7 +223,7 @@ namespace AcxiomCRM.Controllers.Api
                 Probability = dto.Probability,
                 ExpectedCloseDate = dto.ExpectedCloseDate,
                 Status = dto.Stage == "Won" ? "Won" : (dto.Stage == "Lost" ? "Lost" : "Open"),
-                AssignedTo = string.IsNullOrEmpty(dto.AssignedTo) ? user.Id : dto.AssignedTo,
+                AssignedTo = finalAssignedTo,
                 Notes = dto.Notes,
                 CreatedDate = DateTime.UtcNow
             };

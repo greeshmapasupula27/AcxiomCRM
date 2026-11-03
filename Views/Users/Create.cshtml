@@ -39,6 +39,15 @@
                     </div>
 
                     <div class="col-md-6">
+                        <label asp-for="ManagerId" class="form-label fw-semibold">Reporting Manager</label>
+                        <select asp-for="ManagerId" asp-items="ViewBag.ManagersList" class="form-select">
+                            <option value="">-- No Direct Manager (Independent) --</option>
+                        </select>
+                        <span asp-validation-for="ManagerId" class="text-danger small"></span>
+                        <small class="text-muted">Recommended when role is SalesExecutive to link to Manager's team scope.</small>
+                    </div>
+
+                    <div class="col-md-6">
                         <label asp-for="Password" class="form-label fw-semibold">Initial Password <span class="text-danger">*</span></label>
                         <input asp-for="Password" class="form-control" placeholder="Password@123" />
                         <span asp-validation-for="Password" class="text-danger small"></span>

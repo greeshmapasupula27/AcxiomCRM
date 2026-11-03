@@ -1,5 +1,6 @@
 using AcxiomCRM.Models;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
 
 namespace AcxiomCRM.Data
 {
@@ -13,6 +14,28 @@ namespace AcxiomCRM.Data
 
             // Ensure database is created
             await context.Database.EnsureCreatedAsync();
+
+            // Enforce database-level append-only triggers on SQLite engine for AuditLogs
+            try
+            {
+                await context.Database.ExecuteSqlRawAsync(@"
+                    CREATE TRIGGER IF NOT EXISTS trg_AuditLogs_PreventUpdate
+                    BEFORE UPDATE ON AuditLogs
+                    BEGIN
+                        SELECT RAISE(FAIL, 'Audit records are strictly append-only and cannot be modified.');
+                    END;
+
+                    CREATE TRIGGER IF NOT EXISTS trg_AuditLogs_PreventDelete
+                    BEFORE DELETE ON AuditLogs
+                    BEGIN
+                        SELECT RAISE(FAIL, 'Audit records are strictly append-only and cannot be deleted.');
+                    END;
+                ");
+            }
+            catch
+            {
+                // Ignore if provider doesn't support or already exists
+            }
 
             // 1. Seed Roles
             string[] roles = { "Admin", "Manager", "SalesExecutive" };

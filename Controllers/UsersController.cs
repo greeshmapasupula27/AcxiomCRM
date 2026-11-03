@@ -28,7 +28,7 @@ namespace AcxiomCRM.Controllers
         // GET: Users
         public async Task<IActionResult> Index()
         {
-            var users = await _userManager.Users.ToListAsync();
+            var users = await _userManager.Users.Include(u => u.Manager).ToListAsync();
             var list = new List<UserListViewModel>();
 
             foreach (var u in users)
@@ -42,6 +42,8 @@ namespace AcxiomCRM.Controllers
                     FullName = u.FullName,
                     Email = u.Email ?? "",
                     Role = roles.FirstOrDefault() ?? u.PrimaryRole,
+                    ManagerId = u.ManagerId,
+                    ManagerName = u.Manager?.FullName,
                     IsActive = u.IsActive,
                     IsLockedOut = isLockedOut,
                     AccessFailedCount = u.AccessFailedCount,
@@ -54,8 +56,10 @@ namespace AcxiomCRM.Controllers
         }
 
         // GET: Users/Create
-        public IActionResult Create()
+        public async Task<IActionResult> Create()
         {
+            var managers = await GetManagersListAsync();
+            ViewBag.ManagersList = new Microsoft.AspNetCore.Mvc.Rendering.SelectList(managers, "Id", "FullName");
             return View(new RegisterViewModel());
         }
 
@@ -66,6 +70,8 @@ namespace AcxiomCRM.Controllers
         {
             if (!ModelState.IsValid)
             {
+                var managers = await GetManagersListAsync();
+                ViewBag.ManagersList = new Microsoft.AspNetCore.Mvc.Rendering.SelectList(managers, "Id", "FullName", model.ManagerId);
                 return View(model);
             }
 
@@ -73,6 +79,8 @@ namespace AcxiomCRM.Controllers
             if (existing != null)
             {
                 ModelState.AddModelError("Email", "Email already in use.");
+                var managers = await GetManagersListAsync();
+                ViewBag.ManagersList = new Microsoft.AspNetCore.Mvc.Rendering.SelectList(managers, "Id", "FullName", model.ManagerId);
                 return View(model);
             }
 
@@ -82,6 +90,7 @@ namespace AcxiomCRM.Controllers
                 Email = model.Email,
                 FullName = model.FullName,
                 PrimaryRole = model.Role,
+                ManagerId = string.IsNullOrWhiteSpace(model.ManagerId) ? null : model.ManagerId,
                 IsActive = true,
                 CreatedDate = DateTime.UtcNow
             };
@@ -102,7 +111,7 @@ namespace AcxiomCRM.Controllers
                     "User",
                     user.Id,
                     null,
-                    $"User: {user.Email}, Role: {model.Role}",
+                    $"User: {user.Email}, Role: {model.Role}, ManagerId: {user.ManagerId}",
                     "Success",
                     $"Admin created user {user.Email} with role {model.Role}",
                     HttpContext.Connection.RemoteIpAddress?.ToString());
@@ -116,6 +125,8 @@ namespace AcxiomCRM.Controllers
                 ModelState.AddModelError(string.Empty, err.Description);
             }
 
+            var managerList = await GetManagersListAsync();
+            ViewBag.ManagersList = new Microsoft.AspNetCore.Mvc.Rendering.SelectList(managerList, "Id", "FullName", model.ManagerId);
             return View(model);
         }
 
@@ -161,13 +172,19 @@ namespace AcxiomCRM.Controllers
             var roles = await _userManager.GetRolesAsync(user);
             var currentRole = roles.FirstOrDefault() ?? user.PrimaryRole;
 
+            var managers = await GetManagersListAsync();
+            // Don't let a user be their own manager
+            managers = managers.Where(m => m.Id != user.Id).ToList();
+            ViewBag.ManagersList = new Microsoft.AspNetCore.Mvc.Rendering.SelectList(managers, "Id", "FullName", user.ManagerId);
+
             return View(new UserEditRoleViewModel
             {
                 UserId = user.Id,
                 UserEmail = user.Email ?? "",
                 FullName = user.FullName,
                 CurrentRole = currentRole,
-                NewRole = currentRole
+                NewRole = currentRole,
+                ManagerId = user.ManagerId
             });
         }
 
@@ -176,7 +193,12 @@ namespace AcxiomCRM.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> EditRole(UserEditRoleViewModel model)
         {
-            if (!ModelState.IsValid) return View(model);
+            if (!ModelState.IsValid)
+            {
+                var managers = await GetManagersListAsync();
+                ViewBag.ManagersList = new Microsoft.AspNetCore.Mvc.Rendering.SelectList(managers, "Id", "FullName", model.ManagerId);
+                return View(model);
+            }
 
             var user = await _userManager.FindByIdAsync(model.UserId);
             if (user == null) return NotFound();
@@ -185,13 +207,20 @@ namespace AcxiomCRM.Controllers
             if (user.Id == currentUserId && model.NewRole != "Admin")
             {
                 ModelState.AddModelError(string.Empty, "You cannot remove the Admin role from your own current logged-in account.");
+                var managers = await GetManagersListAsync();
+                ViewBag.ManagersList = new Microsoft.AspNetCore.Mvc.Rendering.SelectList(managers, "Id", "FullName", model.ManagerId);
                 return View(model);
             }
 
             var currentRoles = await _userManager.GetRolesAsync(user);
             var oldRole = currentRoles.FirstOrDefault() ?? user.PrimaryRole;
+            var oldManagerId = user.ManagerId;
+            var targetManagerId = string.IsNullOrWhiteSpace(model.ManagerId) ? null : model.ManagerId;
 
-            if (oldRole != model.NewRole)
+            bool roleChanged = oldRole != model.NewRole;
+            bool managerChanged = oldManagerId != targetManagerId;
+
+            if (roleChanged)
             {
                 await _userManager.RemoveFromRolesAsync(user, currentRoles);
                 if (!await _roleManager.RoleExistsAsync(model.NewRole))
@@ -199,8 +228,16 @@ namespace AcxiomCRM.Controllers
                     await _roleManager.CreateAsync(new IdentityRole(model.NewRole));
                 }
                 await _userManager.AddToRoleAsync(user, model.NewRole);
-
                 user.PrimaryRole = model.NewRole;
+            }
+
+            if (managerChanged)
+            {
+                user.ManagerId = targetManagerId;
+            }
+
+            if (roleChanged || managerChanged)
+            {
                 await _userManager.UpdateAsync(user);
 
                 await _auditService.LogAsync(
@@ -208,16 +245,22 @@ namespace AcxiomCRM.Controllers
                     "Role Change",
                     "User",
                     user.Id,
-                    $"Role: {oldRole}",
-                    $"Role: {model.NewRole}",
+                    $"Role: {oldRole}, ManagerId: {oldManagerId}",
+                    $"Role: {model.NewRole}, ManagerId: {user.ManagerId}",
                     "Success",
-                    $"Admin changed role of user {user.Email} from {oldRole} to {model.NewRole}",
+                    $"Admin updated user {user.Email} (Role: {oldRole}->{model.NewRole}, ManagerId: {oldManagerId}->{user.ManagerId})",
                     HttpContext.Connection.RemoteIpAddress?.ToString());
 
-                TempData["SuccessMessage"] = $"Role for {user.FullName} updated to {model.NewRole}.";
+                TempData["SuccessMessage"] = $"Profile for {user.FullName} updated successfully.";
             }
 
             return RedirectToAction(nameof(Index));
+        }
+
+        private async Task<List<ApplicationUser>> GetManagersListAsync()
+        {
+            var managerUsers = await _userManager.GetUsersInRoleAsync("Manager");
+            return managerUsers.Where(u => u.IsActive).OrderBy(u => u.FullName).ToList();
         }
 
         // POST: Users/Unlock/5

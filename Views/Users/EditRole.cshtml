@@ -34,6 +34,15 @@
                     <span asp-validation-for="NewRole" class="text-danger small"></span>
                 </div>
 
+                <div class="mb-3">
+                    <label asp-for="ManagerId" class="form-label fw-semibold">Reporting Manager</label>
+                    <select asp-for="ManagerId" asp-items="ViewBag.ManagersList" class="form-select">
+                        <option value="">-- No Direct Manager (Independent / Unassigned) --</option>
+                    </select>
+                    <span asp-validation-for="ManagerId" class="text-danger small"></span>
+                    <small class="text-muted">Link this user to a Manager so their leads, deals, and activities roll up into that Manager's team view.</small>
+                </div>
+
                 <div class="d-flex justify-content-end gap-2 mt-4">
                     <a asp-action="Index" class="btn btn-outline-secondary">Cancel</a>
                     <button type="submit" class="btn btn-danger">

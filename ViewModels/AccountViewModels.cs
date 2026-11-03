@@ -42,6 +42,9 @@ namespace AcxiomCRM.ViewModels
         // Note: For public self-registration, role is always enforced as SalesExecutive on server.
         // Admins can select roles when provisioning users in User Management.
         public string Role { get; set; } = "SalesExecutive";
+
+        [Display(Name = "Reporting Manager")]
+        public string? ManagerId { get; set; }
     }
 
     public class UserEditRoleViewModel
@@ -58,6 +61,9 @@ namespace AcxiomCRM.ViewModels
         [Required(ErrorMessage = "New role is required.")]
         [Display(Name = "New Role")]
         public string NewRole { get; set; } = "SalesExecutive";
+
+        [Display(Name = "Reporting Manager")]
+        public string? ManagerId { get; set; }
     }
 
     public class ResetPasswordAdminViewModel

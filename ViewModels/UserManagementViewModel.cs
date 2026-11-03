@@ -6,6 +6,8 @@ namespace AcxiomCRM.ViewModels
         public string FullName { get; set; } = string.Empty;
         public string Email { get; set; } = string.Empty;
         public string Role { get; set; } = string.Empty;
+        public string? ManagerId { get; set; }
+        public string? ManagerName { get; set; }
         public bool IsActive { get; set; }
         public bool IsLockedOut { get; set; }
         public int AccessFailedCount { get; set; }

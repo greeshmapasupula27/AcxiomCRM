@@ -156,14 +156,31 @@ namespace AcxiomCRM.Controllers
                 ModelState.AddModelError("ExpectedValue", "Expected value must be greater than 0.");
             }
 
+            var roles = await _userManager.GetRolesAsync(user);
+            if (roles.Contains("SalesExecutive"))
+            {
+                lead.AssignedTo = user.Id;
+            }
+            else if (roles.Contains("Manager"))
+            {
+                if (string.IsNullOrEmpty(lead.AssignedTo)) lead.AssignedTo = user.Id;
+                else if (!await _userScopeService.CanAssignToUserAsync(user, lead.AssignedTo))
+                {
+                    ModelState.AddModelError("AssignedTo", "Managers can only assign leads to themselves or direct team members.");
+                }
+            }
+            else
+            {
+                if (string.IsNullOrEmpty(lead.AssignedTo)) lead.AssignedTo = user.Id;
+                else if (!await _userScopeService.CanAssignToUserAsync(user, lead.AssignedTo))
+                {
+                    ModelState.AddModelError("AssignedTo", "Selected user is invalid or inactive.");
+                }
+            }
+
             if (ModelState.IsValid)
             {
                 lead.CreatedDate = DateTime.UtcNow;
-                if (string.IsNullOrEmpty(lead.AssignedTo))
-                {
-                    lead.AssignedTo = user.Id;
-                }
-
                 _context.Add(lead);
                 await _context.SaveChangesAsync();
 
@@ -235,6 +252,28 @@ namespace AcxiomCRM.Controllers
             if (lead.ExpectedValue <= 0)
             {
                 ModelState.AddModelError("ExpectedValue", "Expected value must be greater than 0.");
+            }
+
+            var roles = await _userManager.GetRolesAsync(user);
+            if (roles.Contains("SalesExecutive"))
+            {
+                lead.AssignedTo = user.Id;
+            }
+            else if (roles.Contains("Manager"))
+            {
+                if (string.IsNullOrEmpty(lead.AssignedTo)) lead.AssignedTo = user.Id;
+                else if (!await _userScopeService.CanAssignToUserAsync(user, lead.AssignedTo))
+                {
+                    ModelState.AddModelError("AssignedTo", "Managers can only assign leads to themselves or direct team members.");
+                }
+            }
+            else
+            {
+                if (string.IsNullOrEmpty(lead.AssignedTo)) lead.AssignedTo = user.Id;
+                else if (!await _userScopeService.CanAssignToUserAsync(user, lead.AssignedTo))
+                {
+                    ModelState.AddModelError("AssignedTo", "Selected user is invalid or inactive.");
+                }
             }
 
             if (ModelState.IsValid)

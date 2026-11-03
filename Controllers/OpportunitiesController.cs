@@ -164,16 +164,53 @@ namespace AcxiomCRM.Controllers
                 ModelState.AddModelError("ExpectedCloseDate", "Expected Close Date cannot be in the past.");
             }
 
+            // Verify Customer accessibility
+            if (opportunity.CustomerId.HasValue)
+            {
+                var customer = await _context.Customers.FindAsync(opportunity.CustomerId.Value);
+                if (customer == null || !await _userScopeService.CanAccessRecordAsync(user, customer.CreatedBy))
+                {
+                    ModelState.AddModelError("CustomerId", "Selected Customer is invalid or not accessible.");
+                }
+            }
+
+            // Verify Lead accessibility
+            if (opportunity.LeadId.HasValue)
+            {
+                var lead = await _context.Leads.FindAsync(opportunity.LeadId.Value);
+                if (lead == null || !await _userScopeService.CanAccessRecordAsync(user, lead.AssignedTo))
+                {
+                    ModelState.AddModelError("LeadId", "Selected Lead is invalid or not accessible.");
+                }
+            }
+
+            var roles = await _userManager.GetRolesAsync(user);
+            if (roles.Contains("SalesExecutive"))
+            {
+                opportunity.AssignedTo = user.Id;
+            }
+            else if (roles.Contains("Manager"))
+            {
+                if (string.IsNullOrEmpty(opportunity.AssignedTo)) opportunity.AssignedTo = user.Id;
+                else if (!await _userScopeService.CanAssignToUserAsync(user, opportunity.AssignedTo))
+                {
+                    ModelState.AddModelError("AssignedTo", "Managers can only assign opportunities to themselves or direct team members.");
+                }
+            }
+            else
+            {
+                if (string.IsNullOrEmpty(opportunity.AssignedTo)) opportunity.AssignedTo = user.Id;
+                else if (!await _userScopeService.CanAssignToUserAsync(user, opportunity.AssignedTo))
+                {
+                    ModelState.AddModelError("AssignedTo", "Selected user is invalid or inactive.");
+                }
+            }
+
             if (ModelState.IsValid)
             {
                 if (opportunity.Stage == "Won") opportunity.Status = "Won";
                 else if (opportunity.Stage == "Lost") opportunity.Status = "Lost";
                 else opportunity.Status = "Open";
-
-                if (string.IsNullOrEmpty(opportunity.AssignedTo))
-                {
-                    opportunity.AssignedTo = user.Id;
-                }
 
                 opportunity.CreatedDate = DateTime.UtcNow;
                 _context.Add(opportunity);
@@ -245,6 +282,48 @@ namespace AcxiomCRM.Controllers
             if (opportunity.Stage != "Won" && opportunity.Stage != "Lost" && opportunity.ExpectedCloseDate.Date < DateTime.UtcNow.Date)
             {
                 ModelState.AddModelError("ExpectedCloseDate", "Expected Close Date cannot be in the past.");
+            }
+
+            // Verify Customer accessibility
+            if (opportunity.CustomerId.HasValue)
+            {
+                var customer = await _context.Customers.FindAsync(opportunity.CustomerId.Value);
+                if (customer == null || !await _userScopeService.CanAccessRecordAsync(user, customer.CreatedBy))
+                {
+                    ModelState.AddModelError("CustomerId", "Selected Customer is invalid or not accessible.");
+                }
+            }
+
+            // Verify Lead accessibility
+            if (opportunity.LeadId.HasValue)
+            {
+                var lead = await _context.Leads.FindAsync(opportunity.LeadId.Value);
+                if (lead == null || !await _userScopeService.CanAccessRecordAsync(user, lead.AssignedTo))
+                {
+                    ModelState.AddModelError("LeadId", "Selected Lead is invalid or not accessible.");
+                }
+            }
+
+            var roles = await _userManager.GetRolesAsync(user);
+            if (roles.Contains("SalesExecutive"))
+            {
+                opportunity.AssignedTo = user.Id;
+            }
+            else if (roles.Contains("Manager"))
+            {
+                if (string.IsNullOrEmpty(opportunity.AssignedTo)) opportunity.AssignedTo = user.Id;
+                else if (!await _userScopeService.CanAssignToUserAsync(user, opportunity.AssignedTo))
+                {
+                    ModelState.AddModelError("AssignedTo", "Managers can only assign opportunities to themselves or direct team members.");
+                }
+            }
+            else
+            {
+                if (string.IsNullOrEmpty(opportunity.AssignedTo)) opportunity.AssignedTo = user.Id;
+                else if (!await _userScopeService.CanAssignToUserAsync(user, opportunity.AssignedTo))
+                {
+                    ModelState.AddModelError("AssignedTo", "Selected user is invalid or inactive.");
+                }
             }
 
             if (ModelState.IsValid)

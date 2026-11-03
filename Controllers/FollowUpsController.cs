@@ -127,13 +127,60 @@ namespace AcxiomCRM.Controllers
                 ModelState.AddModelError("FollowUpDate", "Follow-up date cannot be earlier than today.");
             }
 
+            // Verify Customer accessibility
+            if (followUp.CustomerId.HasValue)
+            {
+                var customer = await _context.Customers.FindAsync(followUp.CustomerId.Value);
+                if (customer == null || !await _userScopeService.CanAccessRecordAsync(user, customer.CreatedBy))
+                {
+                    ModelState.AddModelError("CustomerId", "Selected Customer is invalid or not accessible.");
+                }
+            }
+
+            // Verify Lead accessibility
+            if (followUp.LeadId.HasValue)
+            {
+                var lead = await _context.Leads.FindAsync(followUp.LeadId.Value);
+                if (lead == null || !await _userScopeService.CanAccessRecordAsync(user, lead.AssignedTo))
+                {
+                    ModelState.AddModelError("LeadId", "Selected Lead is invalid or not accessible.");
+                }
+            }
+
+            // Verify Opportunity accessibility
+            if (followUp.OpportunityId.HasValue)
+            {
+                var opp = await _context.Opportunities.FindAsync(followUp.OpportunityId.Value);
+                if (opp == null || !await _userScopeService.CanAccessRecordAsync(user, opp.AssignedTo))
+                {
+                    ModelState.AddModelError("OpportunityId", "Selected Opportunity is invalid or not accessible.");
+                }
+            }
+
+            var roles = await _userManager.GetRolesAsync(user);
+            if (roles.Contains("SalesExecutive"))
+            {
+                followUp.AssignedTo = user.Id;
+            }
+            else if (roles.Contains("Manager"))
+            {
+                if (string.IsNullOrEmpty(followUp.AssignedTo)) followUp.AssignedTo = user.Id;
+                else if (!await _userScopeService.CanAssignToUserAsync(user, followUp.AssignedTo))
+                {
+                    ModelState.AddModelError("AssignedTo", "Managers can only assign follow-ups to themselves or direct team members.");
+                }
+            }
+            else
+            {
+                if (string.IsNullOrEmpty(followUp.AssignedTo)) followUp.AssignedTo = user.Id;
+                else if (!await _userScopeService.CanAssignToUserAsync(user, followUp.AssignedTo))
+                {
+                    ModelState.AddModelError("AssignedTo", "Selected user is invalid or inactive.");
+                }
+            }
+
             if (ModelState.IsValid)
             {
-                if (string.IsNullOrEmpty(followUp.AssignedTo))
-                {
-                    followUp.AssignedTo = user.Id;
-                }
-
                 followUp.CreatedDate = DateTime.UtcNow;
                 _context.Add(followUp);
                 await _context.SaveChangesAsync();
@@ -251,6 +298,58 @@ namespace AcxiomCRM.Controllers
             if (followUp.Status == "Planned" && followUp.FollowUpDate.Date < DateTime.UtcNow.Date)
             {
                 ModelState.AddModelError("FollowUpDate", "Follow-up date cannot be earlier than today.");
+            }
+
+            // Verify Customer accessibility
+            if (followUp.CustomerId.HasValue)
+            {
+                var customer = await _context.Customers.FindAsync(followUp.CustomerId.Value);
+                if (customer == null || !await _userScopeService.CanAccessRecordAsync(user, customer.CreatedBy))
+                {
+                    ModelState.AddModelError("CustomerId", "Selected Customer is invalid or not accessible.");
+                }
+            }
+
+            // Verify Lead accessibility
+            if (followUp.LeadId.HasValue)
+            {
+                var lead = await _context.Leads.FindAsync(followUp.LeadId.Value);
+                if (lead == null || !await _userScopeService.CanAccessRecordAsync(user, lead.AssignedTo))
+                {
+                    ModelState.AddModelError("LeadId", "Selected Lead is invalid or not accessible.");
+                }
+            }
+
+            // Verify Opportunity accessibility
+            if (followUp.OpportunityId.HasValue)
+            {
+                var opp = await _context.Opportunities.FindAsync(followUp.OpportunityId.Value);
+                if (opp == null || !await _userScopeService.CanAccessRecordAsync(user, opp.AssignedTo))
+                {
+                    ModelState.AddModelError("OpportunityId", "Selected Opportunity is invalid or not accessible.");
+                }
+            }
+
+            var roles = await _userManager.GetRolesAsync(user);
+            if (roles.Contains("SalesExecutive"))
+            {
+                followUp.AssignedTo = user.Id;
+            }
+            else if (roles.Contains("Manager"))
+            {
+                if (string.IsNullOrEmpty(followUp.AssignedTo)) followUp.AssignedTo = user.Id;
+                else if (!await _userScopeService.CanAssignToUserAsync(user, followUp.AssignedTo))
+                {
+                    ModelState.AddModelError("AssignedTo", "Managers can only assign follow-ups to themselves or direct team members.");
+                }
+            }
+            else
+            {
+                if (string.IsNullOrEmpty(followUp.AssignedTo)) followUp.AssignedTo = user.Id;
+                else if (!await _userScopeService.CanAssignToUserAsync(user, followUp.AssignedTo))
+                {
+                    ModelState.AddModelError("AssignedTo", "Selected user is invalid or inactive.");
+                }
             }
 
             if (ModelState.IsValid)

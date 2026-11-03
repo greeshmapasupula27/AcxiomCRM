@@ -18,6 +18,20 @@ namespace AcxiomCRM.Data
         public DbSet<Activity> Activities => Set<Activity>();
         public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
 
+        public override int SaveChanges()
+        {
+            // PDF Section 4.9 & 6: Audit records must be append-oriented and protected from deletion/modification
+            foreach (var entry in ChangeTracker.Entries<AuditLog>())
+            {
+                if (entry.State == EntityState.Modified || entry.State == EntityState.Deleted)
+                {
+                    throw new InvalidOperationException("Audit records are append-only and protected from unauthorized modification or deletion.");
+                }
+            }
+
+            return base.SaveChanges();
+        }
+
         public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
         {
             // PDF Section 4.9 & 6: Audit records must be append-oriented and protected from deletion/modification

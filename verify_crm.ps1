@@ -191,6 +191,40 @@ try {
     Assert-Test "Valid Opportunity Creation" $false $_.Exception.Message
 }
 
+# 14. Role Assignment Security: SalesExecutive attempting to assign a lead to another user ID
+$crossAssignLead = @{
+    leadName = "Illegitimate Cross Assigned Lead"
+    email = "cross@test.com"
+    phone = "9876543210"
+    expectedValue = 50000
+    assignedTo = "admin-or-other-user-guid-999"
+} | ConvertTo-Json
+
+try {
+    $res = Invoke-RestMethod -Uri "$baseUrl/api/leads" -Method Post -Body $crossAssignLead -ContentType "application/json" -WebSession $session
+    Assert-Test "Security: SalesExecutive prevented from assigning record to other users" $false "Server allowed cross-user assignment"
+} catch {
+    $statusCode = [int]$_.Exception.Response.StatusCode
+    Assert-Test "Security: SalesExecutive prevented from assigning record to other users" ($statusCode -eq 403) "HTTP Status: $statusCode (Forbidden as required)"
+}
+
+# 15. Ownership Enforcement: SalesExecutive attempting to create Opportunity with inaccessible Customer ID
+$inaccessibleCustomerOpp = @{
+    opportunityName = "Cross-tenant deal attempt"
+    customerId = 99999
+    amount = 30000
+    probability = 40
+    expectedCloseDate = (Get-Date).AddDays(30).ToString("yyyy-MM-ddTHH:mm:ss")
+} | ConvertTo-Json
+
+try {
+    $res = Invoke-RestMethod -Uri "$baseUrl/api/opportunities" -Method Post -Body $inaccessibleCustomerOpp -ContentType "application/json" -WebSession $session
+    Assert-Test "Security: Inaccessible foreign customer reference rejected" $false "Server accepted unauthorized customer link"
+} catch {
+    $statusCode = [int]$_.Exception.Response.StatusCode
+    Assert-Test "Security: Inaccessible foreign customer reference rejected" ($statusCode -eq 403) "HTTP Status: $statusCode (Forbidden as required)"
+}
+
 Write-Host "==========================================================" -ForegroundColor Cyan
 if ($allPassed) {
     Write-Host " ALL ACCEPTANCE SCENARIOS PASSED WITH 100% SUCCESS!" -ForegroundColor Green

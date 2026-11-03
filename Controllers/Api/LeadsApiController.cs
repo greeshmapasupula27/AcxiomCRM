@@ -132,6 +132,48 @@ namespace AcxiomCRM.Controllers.Api
                 return BadRequest(new ApiResponse<LeadDto> { Success = false, Message = "Validation failed.", Errors = errors });
             }
 
+            var roles = await _userManager.GetRolesAsync(user);
+            string finalAssignedTo;
+
+            if (roles.Contains("SalesExecutive"))
+            {
+                // SalesExecutives can strictly assign to themselves only
+                if (!string.IsNullOrEmpty(dto.AssignedTo) && dto.AssignedTo != user.Id)
+                {
+                    return StatusCode(StatusCodes.Status403Forbidden, new ApiResponse<LeadDto>
+                    {
+                        Success = false,
+                        Message = "Sales Executives can only assign records to themselves."
+                    });
+                }
+                finalAssignedTo = user.Id;
+            }
+            else if (roles.Contains("Manager"))
+            {
+                finalAssignedTo = string.IsNullOrEmpty(dto.AssignedTo) ? user.Id : dto.AssignedTo;
+                if (!await _userScopeService.CanAssignToUserAsync(user, finalAssignedTo))
+                {
+                    return StatusCode(StatusCodes.Status403Forbidden, new ApiResponse<LeadDto>
+                    {
+                        Success = false,
+                        Message = "Managers can only assign records to themselves or direct team members."
+                    });
+                }
+            }
+            else
+            {
+                // Admin can assign to any permitted user or self
+                finalAssignedTo = string.IsNullOrEmpty(dto.AssignedTo) ? user.Id : dto.AssignedTo;
+                if (!await _userScopeService.CanAssignToUserAsync(user, finalAssignedTo))
+                {
+                    return BadRequest(new ApiResponse<LeadDto>
+                    {
+                        Success = false,
+                        Message = "Assigned user is invalid or inactive."
+                    });
+                }
+            }
+
             var lead = new Lead
             {
                 LeadCode = string.IsNullOrEmpty(dto.LeadCode) ? "LEAD-" + new Random().Next(1000, 9999) : dto.LeadCode,
@@ -143,7 +185,7 @@ namespace AcxiomCRM.Controllers.Api
                 Status = string.IsNullOrEmpty(dto.Status) ? "New" : dto.Status,
                 Priority = string.IsNullOrEmpty(dto.Priority) ? "Medium" : dto.Priority,
                 ExpectedValue = dto.ExpectedValue,
-                AssignedTo = string.IsNullOrEmpty(dto.AssignedTo) ? user.Id : dto.AssignedTo,
+                AssignedTo = finalAssignedTo,
                 Notes = dto.Notes,
                 CreatedDate = DateTime.UtcNow
             };
