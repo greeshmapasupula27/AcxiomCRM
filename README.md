@@ -123,7 +123,7 @@ All REST endpoints communicate via JSON using clean DTO projections, enforce `[A
 ## 6. Live Running Deployment & Local Execution
 
 ### Live Demo Link:
-- **Public URL**: [https://implemented-realtors-rubber-paste.trycloudflare.com](https://implemented-realtors-rubber-paste.trycloudflare.com)
+- **Public URL**: [https://advocacy-admit-msie-summary.trycloudflare.com](https://advocacy-admit-msie-summary.trycloudflare.com)
 
 ### Local Execution:
 Open PowerShell in the project directory:
