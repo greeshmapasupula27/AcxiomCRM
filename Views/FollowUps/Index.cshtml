@@ -1,0 +1,155 @@
+@model IEnumerable<AcxiomCRM.Models.FollowUp>
+@{
+    ViewData["Title"] = "Follow-Up Management";
+}
+
+<div class="d-flex flex-wrap justify-content-between align-items-center mb-4 gap-3">
+    <div>
+        <h3 class="fw-bold text-dark mb-1"><i class="bi bi-calendar-check-fill text-info me-2"></i>Follow-Up Management</h3>
+        <p class="text-muted mb-0 small">Schedule customer & lead touchpoints, monitor overdue tasks, and track meeting notes.</p>
+    </div>
+    <div class="d-flex gap-2">
+        <a asp-controller="Reports" asp-action="ExportCsv" asp-route-type="followup" class="btn btn-outline-secondary btn-sm">
+            <i class="bi bi-download me-1"></i> Export CSV
+        </a>
+        <a asp-action="Create" class="btn btn-info text-white btn-sm">
+            <i class="bi bi-calendar-plus me-1"></i> Schedule Follow-Up
+        </a>
+    </div>
+</div>
+
+<!-- Filters Bar (PDF Section 17.13) -->
+<div class="crm-card p-3 mb-4">
+    <form method="get" class="row g-2 align-items-center">
+        <div class="col-6 col-md-3">
+            <select name="status" class="form-select form-select-sm">
+                <option value="">All Statuses</option>
+                <option value="Planned" selected="@(ViewBag.CurrentStatus == "Planned")">Planned</option>
+                <option value="Completed" selected="@(ViewBag.CurrentStatus == "Completed")">Completed</option>
+                <option value="Missed" selected="@(ViewBag.CurrentStatus == "Missed")">Missed</option>
+                <option value="Cancelled" selected="@(ViewBag.CurrentStatus == "Cancelled")">Cancelled</option>
+            </select>
+        </div>
+        <div class="col-6 col-md-3">
+            <select name="type" class="form-select form-select-sm">
+                <option value="">All Types</option>
+                <option value="Call" selected="@(ViewBag.CurrentType == "Call")">Call</option>
+                <option value="Meeting" selected="@(ViewBag.CurrentType == "Meeting")">Meeting</option>
+                <option value="Email" selected="@(ViewBag.CurrentType == "Email")">Email</option>
+                <option value="Demo" selected="@(ViewBag.CurrentType == "Demo")">Demo</option>
+            </select>
+        </div>
+        <div class="col-6 col-md-3">
+            <input type="date" name="date" value="@ViewBag.CurrentDate" class="form-control form-control-sm" placeholder="Filter by date" />
+        </div>
+        <div class="col-6 col-md-3 d-flex gap-2">
+            <button type="submit" class="btn btn-sm btn-primary w-100"><i class="bi bi-funnel"></i> Filter</button>
+            <a asp-action="Index" class="btn btn-sm btn-outline-secondary" title="Reset Filters"><i class="bi bi-arrow-counterclockwise"></i></a>
+        </div>
+    </form>
+</div>
+
+<!-- Follow-Ups Table -->
+<div class="crm-card p-0 overflow-hidden">
+    <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0">
+            <thead>
+                <tr>
+                    <th>Scheduled Date</th>
+                    <th>Type</th>
+                    <th>Subject</th>
+                    <th>Associated Contact / Deal</th>
+                    <th>Status</th>
+                    <th>Assigned To</th>
+                    <th>Remarks</th>
+                    <th class="text-end">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                @if (Model.Any())
+                {
+                    foreach (var item in Model)
+                    {
+                        var isOverdue = item.Status == "Planned" && item.FollowUpDate.Date < DateTime.UtcNow.Date;
+                        <tr class="@(isOverdue ? "table-danger-subtle" : "")">
+                            <td>
+                                <span class="@(isOverdue ? "text-danger fw-bold" : "fw-medium")">
+                                    <i class="bi @(isOverdue ? "bi-exclamation-circle-fill text-danger" : "bi-calendar") me-1"></i>
+                                    @item.FollowUpDate.ToString("yyyy-MM-dd")
+                                </span>
+                            </td>
+                            <td><span class="badge bg-light text-dark border">@item.FollowUpType</span></td>
+                            <td class="fw-semibold">@item.Subject</td>
+                            <td class="small">
+                                @if (item.Customer != null)
+                                {
+                                    <span class="d-block"><i class="bi bi-person me-1 text-primary"></i>@item.Customer.CustomerName</span>
+                                }
+                                @if (item.Lead != null)
+                                {
+                                    <span class="d-block"><i class="bi bi-funnel me-1 text-success"></i>@item.Lead.LeadName</span>
+                                }
+                                @if (item.Opportunity != null)
+                                {
+                                    <span class="d-block"><i class="bi bi-briefcase me-1 text-warning"></i>@item.Opportunity.OpportunityName</span>
+                                }
+                            </td>
+                            <td>
+                                <span class="badge @(item.Status == "Completed" ? "bg-success" : isOverdue ? "bg-danger" : item.Status == "Planned" ? "bg-info text-dark" : "bg-secondary")">
+                                    @(isOverdue ? "Overdue" : item.Status)
+                                </span>
+                            </td>
+                            <td class="small">@(item.AssignedUser?.FullName ?? "Unassigned")</td>
+                            <td class="small text-muted" style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                                @(item.Remarks ?? "—")
+                            </td>
+                            <td class="text-end">
+                                <div class="btn-group btn-group-sm">
+                                    @if (item.Status == "Planned")
+                                    {
+                                        <form asp-action="Complete" asp-route-id="@item.FollowUpId" method="post" class="d-inline">
+                                            @Html.AntiForgeryToken()
+                                            <button type="submit" class="btn btn-outline-success" title="Mark as Completed">
+                                                <i class="bi bi-check-lg"></i>
+                                            </button>
+                                        </form>
+                                    }
+                                    <a asp-action="Edit" asp-route-id="@item.FollowUpId" class="btn btn-outline-primary" title="Edit"><i class="bi bi-pencil"></i></a>
+                                    <form asp-action="Delete" asp-route-id="@item.FollowUpId" method="post" class="d-inline" onsubmit="return confirm('Delete this follow-up?');">
+                                        @Html.AntiForgeryToken()
+                                        <button type="submit" class="btn btn-outline-danger" title="Delete"><i class="bi bi-trash"></i></button>
+                                    </form>
+                                </div>
+                            </td>
+                        </tr>
+                    }
+                }
+                else
+                {
+                    <tr>
+                        <td colspan="8" class="text-center py-5 text-muted">
+                            <i class="bi bi-calendar2-x fs-1 d-block mb-2"></i>
+                            No follow-up activities found.
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Pagination -->
+    @if (ViewBag.TotalPages > 1)
+    {
+        <div class="d-flex justify-content-between align-items-center p-3 border-top">
+            <span class="small text-muted">Showing page @ViewBag.CurrentPage of @ViewBag.TotalPages</span>
+            <ul class="pagination pagination-sm mb-0">
+                @for (int i = 1; i <= ViewBag.TotalPages; i++)
+                {
+                    <li class="page-item @(i == ViewBag.CurrentPage ? "active" : "")">
+                        <a class="page-link" asp-action="Index" asp-route-page="@i" asp-route-status="@ViewBag.CurrentStatus" asp-route-type="@ViewBag.CurrentType">@i</a>
+                    </li>
+                }
+            </ul>
+        </div>
+    }
+</div>

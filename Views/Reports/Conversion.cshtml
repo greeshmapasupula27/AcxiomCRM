@@ -1,0 +1,86 @@
+@model IEnumerable<AcxiomCRM.Models.Lead>
+@{
+    ViewData["Title"] = "Sales & Lead Conversion Report";
+}
+
+<div class="d-flex flex-wrap justify-content-between align-items-center mb-4 gap-3">
+    <div class="d-flex align-items-center gap-3">
+        <a asp-action="Index" class="btn btn-outline-secondary btn-sm"><i class="bi bi-arrow-left"></i></a>
+        <div>
+            <h3 class="fw-bold text-dark mb-0"><i class="bi bi-funnel-fill text-success me-2"></i>Lead Conversion Analytics</h3>
+            <p class="text-muted mb-0 small">Conversion effectiveness, deal velocity, and qualification metrics.</p>
+        </div>
+    </div>
+    <a asp-action="ExportCsv" asp-route-type="lead" class="btn btn-outline-success btn-sm">
+        <i class="bi bi-download me-1"></i> Export Leads CSV
+    </a>
+</div>
+
+<!-- Conversion Metrics Strip -->
+<div class="row g-3 mb-4">
+    <div class="col-6 col-md-3">
+        <div class="crm-card p-3">
+            <span class="text-muted small text-uppercase fw-semibold">Total Leads Captured</span>
+            <h3 class="fw-bold text-dark mb-0">@ViewBag.TotalLeads</h3>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="crm-card p-3">
+            <span class="text-muted small text-uppercase fw-semibold">Converted to Customers</span>
+            <h3 class="fw-bold text-success mb-0">@ViewBag.ConvertedLeads</h3>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="crm-card p-3">
+            <span class="text-muted small text-uppercase fw-semibold">Lost / Unqualified</span>
+            <h3 class="fw-bold text-secondary mb-0">@ViewBag.LostLeads</h3>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="crm-card p-3">
+            <span class="text-muted small text-uppercase fw-semibold">Overall Conversion Rate</span>
+            <h3 class="fw-bold text-primary mb-0">@(((double)ViewBag.ConversionRate).ToString("F1"))%</h3>
+        </div>
+    </div>
+</div>
+
+<div class="crm-card p-0 overflow-hidden">
+    <div class="p-3 bg-light border-bottom fw-bold text-dark">
+        All Captured Leads & Outcome
+    </div>
+    <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0 small">
+            <thead>
+                <tr>
+                    <th>Lead Code</th>
+                    <th>Prospect Name</th>
+                    <th>Company</th>
+                    <th>Source</th>
+                    <th>Priority</th>
+                    <th>Expected Value</th>
+                    <th>Current Status</th>
+                    <th>Assigned Rep</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var l in Model)
+                {
+                    <tr>
+                        <td><span class="badge bg-light text-dark border">@l.LeadCode</span></td>
+                        <td class="fw-semibold">@l.LeadName</td>
+                        <td>@(l.CompanyName ?? "—")</td>
+                        <td><span class="badge bg-light text-secondary border">@l.Source</span></td>
+                        <td><span class="badge @(l.Priority == "High" ? "bg-danger" : "bg-secondary")">@l.Priority</span></td>
+                        <td class="fw-bold">$@l.ExpectedValue.ToString("N0")</td>
+                        <td>
+                            <span class="badge @(l.Status == "Converted" ? "bg-success" : l.Status == "Qualified" ? "bg-primary" : "bg-secondary")">
+                                @l.Status
+                            </span>
+                        </td>
+                        <td>@(l.AssignedUser?.FullName ?? "Unassigned")</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</div>

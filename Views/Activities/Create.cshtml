@@ -1,0 +1,93 @@
+@model AcxiomCRM.Models.Activity
+@{
+    ViewData["Title"] = "Log Activity";
+}
+
+<div class="row justify-content-center">
+    <div class="col-12 col-lg-8">
+        <div class="d-flex align-items-center mb-3">
+            <a asp-action="Index" class="btn btn-sm btn-outline-secondary me-2"><i class="bi bi-arrow-left"></i></a>
+            <h4 class="fw-bold mb-0">Log Sales Activity</h4>
+        </div>
+
+        <div class="crm-card p-4">
+            <form asp-action="Create" method="post">
+                @Html.AntiForgeryToken()
+                <div asp-validation-summary="ModelOnly" class="alert alert-danger" role="alert"></div>
+
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <label asp-for="ActivityType" class="form-label fw-semibold">Activity Type <span class="text-danger">*</span></label>
+                        <select asp-for="ActivityType" class="form-select">
+                            <option value="Call">Call</option>
+                            <option value="Meeting">Meeting</option>
+                            <option value="Email">Email</option>
+                            <option value="Task">Task</option>
+                        </select>
+                        <span asp-validation-for="ActivityType" class="text-danger small"></span>
+                    </div>
+
+                    <div class="col-md-6">
+                        <label asp-for="ActivityDate" class="form-label fw-semibold">Activity Timestamp <span class="text-danger">*</span></label>
+                        <input asp-for="ActivityDate" class="form-control" type="datetime-local" />
+                        <span asp-validation-for="ActivityDate" class="text-danger small"></span>
+                    </div>
+
+                    <div class="col-12">
+                        <label asp-for="Subject" class="form-label fw-semibold">Subject <span class="text-danger">*</span></label>
+                        <input asp-for="Subject" class="form-control" placeholder="e.g. Discussed cloud migration architecture" />
+                        <span asp-validation-for="Subject" class="text-danger small"></span>
+                    </div>
+
+                    <div class="col-md-6">
+                        <label asp-for="CustomerId" class="form-label fw-semibold">Related Customer</label>
+                        <select asp-for="CustomerId" asp-items="@ViewBag.CustomersList" class="form-select">
+                            <option value="">-- None --</option>
+                        </select>
+                    </div>
+
+                    <div class="col-md-6">
+                        <label asp-for="LeadId" class="form-label fw-semibold">Related Lead</label>
+                        <select asp-for="LeadId" asp-items="@ViewBag.LeadsList" class="form-select">
+                            <option value="">-- None --</option>
+                        </select>
+                    </div>
+
+                    <div class="col-md-6">
+                        <label asp-for="Status" class="form-label fw-semibold">Status</label>
+                        <select asp-for="Status" class="form-select">
+                            <option value="Completed">Completed</option>
+                            <option value="Pending">Pending</option>
+                            <option value="Cancelled">Cancelled</option>
+                        </select>
+                    </div>
+
+                    <div class="col-md-6">
+                        <label asp-for="AssignedTo" class="form-label fw-semibold">Assigned / Performed By</label>
+                        <select asp-for="AssignedTo" asp-items="@ViewBag.UsersList" class="form-select">
+                            <option value="">-- Unassigned --</option>
+                        </select>
+                    </div>
+
+                    <div class="col-12">
+                        <label asp-for="Description" class="form-label fw-semibold">Summary / Outcome Details</label>
+                        <textarea asp-for="Description" class="form-control" rows="3" placeholder="Meeting minutes, customer response, next actions..."></textarea>
+                    </div>
+                </div>
+
+                <hr class="my-4" />
+
+                <div class="d-flex justify-content-end gap-2">
+                    <a asp-action="Index" class="btn btn-outline-secondary">Cancel</a>
+                    <button type="submit" class="btn btn-primary px-4 fw-semibold">
+                        <i class="bi bi-check-lg me-1"></i> Save Activity
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    @{await Html.RenderPartialAsync("_ValidationScriptsPartial");}
+}

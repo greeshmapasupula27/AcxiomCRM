@@ -1,0 +1,166 @@
+@model IEnumerable<AcxiomCRM.Models.Lead>
+@{
+    ViewData["Title"] = "Lead Management";
+}
+
+<div class="d-flex flex-wrap justify-content-between align-items-center mb-4 gap-3">
+    <div>
+        <h3 class="fw-bold text-dark mb-1"><i class="bi bi-funnel-fill text-success me-2"></i>Lead Management</h3>
+        <p class="text-muted mb-0 small">Capture, qualify, assign prospective leads, and convert them to opportunities.</p>
+    </div>
+    <div class="d-flex gap-2">
+        <a asp-controller="Reports" asp-action="ExportCsv" asp-route-type="lead" class="btn btn-outline-secondary btn-sm">
+            <i class="bi bi-download me-1"></i> Export CSV
+        </a>
+        <a asp-action="Create" class="btn btn-success btn-sm">
+            <i class="bi bi-plus-circle me-1"></i> Capture New Lead
+        </a>
+    </div>
+</div>
+
+<!-- Search & Filtering Bar (PDF Section 17.13) -->
+<div class="crm-card p-3 mb-4">
+    <form method="get" class="row g-2 align-items-center">
+        <div class="col-12 col-md-4">
+            <div class="input-group input-group-sm">
+                <span class="input-group-text bg-white"><i class="bi bi-search text-muted"></i></span>
+                <input type="text" name="search" value="@ViewBag.CurrentSearch" class="form-control" placeholder="Search by lead name, company, email, phone..." />
+            </div>
+        </div>
+        <div class="col-6 col-md-2">
+            <select name="status" class="form-select form-select-sm">
+                <option value="">All Statuses</option>
+                <option value="New" selected="@(ViewBag.CurrentStatus == "New")">New</option>
+                <option value="Contacted" selected="@(ViewBag.CurrentStatus == "Contacted")">Contacted</option>
+                <option value="Qualified" selected="@(ViewBag.CurrentStatus == "Qualified")">Qualified</option>
+                <option value="Unqualified" selected="@(ViewBag.CurrentStatus == "Unqualified")">Unqualified</option>
+                <option value="Converted" selected="@(ViewBag.CurrentStatus == "Converted")">Converted</option>
+                <option value="Lost" selected="@(ViewBag.CurrentStatus == "Lost")">Lost</option>
+            </select>
+        </div>
+        <div class="col-6 col-md-2">
+            <select name="priority" class="form-select form-select-sm">
+                <option value="">All Priorities</option>
+                <option value="High" selected="@(ViewBag.CurrentPriority == "High")">High</option>
+                <option value="Medium" selected="@(ViewBag.CurrentPriority == "Medium")">Medium</option>
+                <option value="Low" selected="@(ViewBag.CurrentPriority == "Low")">Low</option>
+            </select>
+        </div>
+        <div class="col-6 col-md-2">
+            <select name="assignedTo" asp-items="@ViewBag.UsersList" class="form-select form-select-sm">
+                <option value="">All Assignees</option>
+            </select>
+        </div>
+        <div class="col-6 col-md-2 d-flex gap-2">
+            <button type="submit" class="btn btn-sm btn-primary w-100"><i class="bi bi-funnel"></i> Filter</button>
+            <a asp-action="Index" class="btn btn-sm btn-outline-secondary" title="Reset Filters"><i class="bi bi-arrow-counterclockwise"></i></a>
+        </div>
+    </form>
+</div>
+
+<!-- Leads Table -->
+<div class="crm-card p-0 overflow-hidden">
+    <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0">
+            <thead>
+                <tr>
+                    <th>Lead Code</th>
+                    <th>Prospect Name</th>
+                    <th>Company</th>
+                    <th>Contact</th>
+                    <th>Source</th>
+                    <th>Status</th>
+                    <th>Priority</th>
+                    <th>Expected Value</th>
+                    <th>Assigned To</th>
+                    <th class="text-end">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                @if (Model.Any())
+                {
+                    foreach (var item in Model)
+                    {
+                        <tr>
+                            <td><span class="badge bg-light text-dark border">@item.LeadCode</span></td>
+                            <td class="fw-semibold">
+                                <a asp-action="Details" asp-route-id="@item.LeadId" class="text-decoration-none text-dark">
+                                    @item.LeadName
+                                </a>
+                            </td>
+                            <td>@(item.CompanyName ?? "—")</td>
+                            <td>
+                                <div class="small">@item.Email</div>
+                                <div class="small text-muted font-monospace">@item.Phone</div>
+                            </td>
+                            <td><span class="badge bg-light text-secondary border">@item.Source</span></td>
+                            <td>
+                                @if (item.Status == "Converted")
+                                {
+                                    <span class="badge bg-success-subtle text-success border border-success-subtle"><i class="bi bi-check-all"></i> Converted</span>
+                                }
+                                else if (item.Status == "Qualified")
+                                {
+                                    <span class="badge bg-primary-subtle text-primary border border-primary-subtle">Qualified</span>
+                                }
+                                else if (item.Status == "Lost" || item.Status == "Unqualified")
+                                {
+                                    <span class="badge bg-secondary-subtle text-secondary">@item.Status</span>
+                                }
+                                else
+                                {
+                                    <span class="badge bg-info-subtle text-info border border-info-subtle">@item.Status</span>
+                                }
+                            </td>
+                            <td>
+                                <span class="badge @(item.Priority == "High" ? "bg-danger" : item.Priority == "Medium" ? "bg-warning text-dark" : "bg-light text-dark border")">
+                                    @item.Priority
+                                </span>
+                            </td>
+                            <td class="fw-bold text-dark">$@item.ExpectedValue.ToString("N0")</td>
+                            <td class="small">@(item.AssignedUser?.FullName ?? "Unassigned")</td>
+                            <td class="text-end">
+                                <div class="btn-group btn-group-sm">
+                                    @if (item.Status != "Converted")
+                                    {
+                                        <a asp-action="Convert" asp-route-id="@item.LeadId" class="btn btn-outline-success" title="Convert to Customer & Deal">
+                                            <i class="bi bi-box-arrow-up-right me-1"></i> Convert
+                                        </a>
+                                    }
+                                    <a asp-action="Details" asp-route-id="@item.LeadId" class="btn btn-outline-secondary" title="Details"><i class="bi bi-eye"></i></a>
+                                    <a asp-action="Edit" asp-route-id="@item.LeadId" class="btn btn-outline-primary" title="Edit"><i class="bi bi-pencil"></i></a>
+                                    <a asp-action="Delete" asp-route-id="@item.LeadId" class="btn btn-outline-danger" title="Delete"><i class="bi bi-trash"></i></a>
+                                </div>
+                            </td>
+                        </tr>
+                    }
+                }
+                else
+                {
+                    <tr>
+                        <td colspan="10" class="text-center py-5 text-muted">
+                            <i class="bi bi-funnel fs-1 d-block mb-2"></i>
+                            No lead records found.
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Pagination -->
+    @if (ViewBag.TotalPages > 1)
+    {
+        <div class="d-flex justify-content-between align-items-center p-3 border-top">
+            <span class="small text-muted">Showing page @ViewBag.CurrentPage of @ViewBag.TotalPages (Total @ViewBag.TotalCount leads)</span>
+            <ul class="pagination pagination-sm mb-0">
+                @for (int i = 1; i <= ViewBag.TotalPages; i++)
+                {
+                    <li class="page-item @(i == ViewBag.CurrentPage ? "active" : "")">
+                        <a class="page-link" asp-action="Index" asp-route-page="@i" asp-route-search="@ViewBag.CurrentSearch" asp-route-status="@ViewBag.CurrentStatus" asp-route-priority="@ViewBag.CurrentPriority">@i</a>
+                    </li>
+                }
+            </ul>
+        </div>
+    }
+</div>

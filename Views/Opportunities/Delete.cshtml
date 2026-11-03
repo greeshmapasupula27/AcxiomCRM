@@ -1,0 +1,35 @@
+@model AcxiomCRM.Models.Opportunity
+@{
+    ViewData["Title"] = "Delete Opportunity";
+}
+
+<div class="row justify-content-center">
+    <div class="col-12 col-md-6">
+        <div class="crm-card p-4 text-center">
+            <div class="text-danger mb-3">
+                <i class="bi bi-trash-fill display-4"></i>
+            </div>
+            <h4 class="fw-bold mb-2">Delete Opportunity</h4>
+            <p class="text-muted small">
+                Are you sure you want to permanently delete opportunity <strong>@Model.OpportunityName</strong>? This action cannot be undone and will be logged in the security audit trail.
+            </p>
+
+            <div class="alert alert-light border text-start small my-3">
+                <div><strong>Amount:</strong> $@Model.Amount.ToString("N0")</div>
+                <div><strong>Stage:</strong> @Model.Stage</div>
+                <div><strong>Close Date:</strong> @Model.ExpectedCloseDate.ToString("yyyy-MM-dd")</div>
+            </div>
+
+            <form asp-action="Delete" method="post">
+                @Html.AntiForgeryToken()
+                <input type="hidden" asp-for="OpportunityId" />
+                <div class="d-flex justify-content-center gap-2 mt-4">
+                    <a asp-action="Index" class="btn btn-outline-secondary">Cancel</a>
+                    <button type="submit" class="btn btn-danger px-4">
+                        <i class="bi bi-trash-fill me-1"></i> Confirm Delete
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>

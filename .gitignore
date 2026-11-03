@@ -1,0 +1,22 @@
+## Visual Studio / .NET build outputs
+bin/
+obj/
+*.user
+*.userosscache
+*.sln.docstates
+*.suo
+
+## Temporary files & logs
+*.log
+stderr.log
+stdout.log
+app.log
+
+## SQLite temporary journals
+*.db-shm
+*.db-wal
+
+## IDE settings
+.vs/
+.vscode/
+.idea/

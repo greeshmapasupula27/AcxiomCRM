@@ -1,0 +1,234 @@
+using AcxiomCRM.Models;
+using AcxiomCRM.Services;
+using AcxiomCRM.ViewModels;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+
+namespace AcxiomCRM.Controllers
+{
+    [Authorize(Roles = "Admin")]
+    public class UsersController : Controller
+    {
+        private readonly UserManager<ApplicationUser> _userManager;
+        private readonly RoleManager<IdentityRole> _roleManager;
+        private readonly IAuditService _auditService;
+
+        public UsersController(
+            UserManager<ApplicationUser> userManager,
+            RoleManager<IdentityRole> roleManager,
+            IAuditService auditService)
+        {
+            _userManager = userManager;
+            _roleManager = roleManager;
+            _auditService = auditService;
+        }
+
+        // GET: Users
+        public async Task<IActionResult> Index()
+        {
+            var users = await _userManager.Users.ToListAsync();
+            var list = new List<UserListViewModel>();
+
+            foreach (var u in users)
+            {
+                var roles = await _userManager.GetRolesAsync(u);
+                var isLockedOut = await _userManager.IsLockedOutAsync(u);
+
+                list.Add(new UserListViewModel
+                {
+                    Id = u.Id,
+                    FullName = u.FullName,
+                    Email = u.Email ?? "",
+                    Role = roles.FirstOrDefault() ?? u.PrimaryRole,
+                    IsActive = u.IsActive,
+                    IsLockedOut = isLockedOut,
+                    AccessFailedCount = u.AccessFailedCount,
+                    LockoutEnd = u.LockoutEnd?.UtcDateTime,
+                    CreatedDate = u.CreatedDate
+                });
+            }
+
+            return View(list);
+        }
+
+        // GET: Users/Create
+        public IActionResult Create()
+        {
+            return View(new RegisterViewModel());
+        }
+
+        // POST: Users/Create
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> Create(RegisterViewModel model)
+        {
+            if (!ModelState.IsValid)
+            {
+                return View(model);
+            }
+
+            var existing = await _userManager.FindByEmailAsync(model.Email);
+            if (existing != null)
+            {
+                ModelState.AddModelError("Email", "Email already in use.");
+                return View(model);
+            }
+
+            var user = new ApplicationUser
+            {
+                UserName = model.Email,
+                Email = model.Email,
+                FullName = model.FullName,
+                PrimaryRole = model.Role,
+                IsActive = true,
+                CreatedDate = DateTime.UtcNow
+            };
+
+            var result = await _userManager.CreateAsync(user, model.Password);
+            if (result.Succeeded)
+            {
+                if (!await _roleManager.RoleExistsAsync(model.Role))
+                {
+                    await _roleManager.CreateAsync(new IdentityRole(model.Role));
+                }
+                await _userManager.AddToRoleAsync(user, model.Role);
+
+                var currentUserId = _userManager.GetUserId(User);
+                await _auditService.LogAsync(
+                    currentUserId,
+                    "Create",
+                    "User",
+                    user.Id,
+                    null,
+                    $"User: {user.Email}, Role: {model.Role}",
+                    "Success",
+                    $"Admin created user {user.Email} with role {model.Role}",
+                    HttpContext.Connection.RemoteIpAddress?.ToString());
+
+                TempData["SuccessMessage"] = $"User '{user.FullName}' created successfully.";
+                return RedirectToAction(nameof(Index));
+            }
+
+            foreach (var err in result.Errors)
+            {
+                ModelState.AddModelError(string.Empty, err.Description);
+            }
+
+            return View(model);
+        }
+
+        // POST: Users/ToggleStatus/5
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> ToggleStatus(string id)
+        {
+            var user = await _userManager.FindByIdAsync(id);
+            if (user == null) return NotFound();
+
+            var currentUserId = _userManager.GetUserId(User);
+            if (user.Id == currentUserId)
+            {
+                TempData["ErrorMessage"] = "You cannot deactivate your own admin account.";
+                return RedirectToAction(nameof(Index));
+            }
+
+            user.IsActive = !user.IsActive;
+            await _userManager.UpdateAsync(user);
+
+            await _auditService.LogAsync(
+                currentUserId,
+                "Role Change",
+                "User",
+                user.Id,
+                $"IsActive: {!user.IsActive}",
+                $"IsActive: {user.IsActive}",
+                "Success",
+                $"Admin {(user.IsActive ? "activated" : "deactivated")} user {user.Email}",
+                HttpContext.Connection.RemoteIpAddress?.ToString());
+
+            TempData["SuccessMessage"] = $"User '{user.FullName}' is now {(user.IsActive ? "Active" : "Inactive")}.";
+            return RedirectToAction(nameof(Index));
+        }
+
+        // POST: Users/Unlock/5
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> Unlock(string id)
+        {
+            var user = await _userManager.FindByIdAsync(id);
+            if (user == null) return NotFound();
+
+            await _userManager.SetLockoutEndDateAsync(user, null);
+            await _userManager.ResetAccessFailedCountAsync(user);
+
+            var currentUserId = _userManager.GetUserId(User);
+            await _auditService.LogAsync(
+                currentUserId,
+                "Security",
+                "User",
+                user.Id,
+                "LockedOut: true",
+                "LockedOut: false",
+                "Success",
+                $"Admin unlocked account for {user.Email}",
+                HttpContext.Connection.RemoteIpAddress?.ToString());
+
+            TempData["SuccessMessage"] = $"Account for '{user.FullName}' unlocked successfully.";
+            return RedirectToAction(nameof(Index));
+        }
+
+        // GET: Users/ResetPassword/5
+        public async Task<IActionResult> ResetPassword(string id)
+        {
+            var user = await _userManager.FindByIdAsync(id);
+            if (user == null) return NotFound();
+
+            return View(new ResetPasswordAdminViewModel
+            {
+                UserId = user.Id,
+                UserEmail = user.Email ?? ""
+            });
+        }
+
+        // POST: Users/ResetPassword/5
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> ResetPassword(ResetPasswordAdminViewModel model)
+        {
+            if (!ModelState.IsValid) return View(model);
+
+            var user = await _userManager.FindByIdAsync(model.UserId);
+            if (user == null) return NotFound();
+
+            var token = await _userManager.GeneratePasswordResetTokenAsync(user);
+            var result = await _userManager.ResetPasswordAsync(user, token, model.NewPassword);
+
+            if (result.Succeeded)
+            {
+                var currentUserId = _userManager.GetUserId(User);
+                await _auditService.LogAsync(
+                    currentUserId,
+                    "Security",
+                    "User",
+                    user.Id,
+                    null,
+                    "Password Reset",
+                    "Success",
+                    $"Admin reset password for {user.Email}",
+                    HttpContext.Connection.RemoteIpAddress?.ToString());
+
+                TempData["SuccessMessage"] = $"Password for {user.Email} has been reset successfully.";
+                return RedirectToAction(nameof(Index));
+            }
+
+            foreach (var err in result.Errors)
+            {
+                ModelState.AddModelError(string.Empty, err.Description);
+            }
+
+            return View(model);
+        }
+    }
+}

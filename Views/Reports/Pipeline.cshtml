@@ -1,0 +1,74 @@
+@model IEnumerable<AcxiomCRM.Models.Opportunity>
+@{
+    ViewData["Title"] = "Pipeline Report";
+    var stages = ViewBag.PipelineByStage as IEnumerable<dynamic>;
+}
+
+<div class="d-flex flex-wrap justify-content-between align-items-center mb-4 gap-3">
+    <div class="d-flex align-items-center gap-3">
+        <a asp-action="Index" class="btn btn-outline-secondary btn-sm"><i class="bi bi-arrow-left"></i></a>
+        <div>
+            <h3 class="fw-bold text-dark mb-0"><i class="bi bi-bar-chart-steps text-primary me-2"></i>Stage-Wise Pipeline Report</h3>
+            <p class="text-muted mb-0 small">Aggregated opportunity metrics and weighted sales forecasts across pipeline stages.</p>
+        </div>
+    </div>
+    <a asp-action="ExportCsv" asp-route-type="opportunity" class="btn btn-outline-primary btn-sm">
+        <i class="bi bi-download me-1"></i> Export Opportunities CSV
+    </a>
+</div>
+
+<!-- Stage Breakdown Cards -->
+<div class="row g-3 mb-4">
+    @if (stages != null)
+    {
+        foreach (var s in stages)
+        {
+            <div class="col-12 col-md-4 col-lg">
+                <div class="crm-card p-3">
+                    <span class="badge @(s.Stage == "Won" ? "bg-success" : s.Stage == "Lost" ? "bg-secondary" : "bg-primary") mb-2">@s.Stage</span>
+                    <h5 class="fw-bold text-dark mb-1">$@(((decimal)s.TotalAmount).ToString("N0"))</h5>
+                    <div class="small text-muted">@s.Count deal(s)</div>
+                    <small class="text-success fw-semibold">Weighted: $@(((decimal)s.WeightedAmount).ToString("N0"))</small>
+                </div>
+            </div>
+        }
+    }
+</div>
+
+<!-- Opportunities Detail Table -->
+<div class="crm-card p-0 overflow-hidden">
+    <div class="p-3 bg-light border-bottom fw-bold text-dark">
+        Active Opportunities In Pipeline
+    </div>
+    <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0 small">
+            <thead>
+                <tr>
+                    <th>Opportunity</th>
+                    <th>Customer</th>
+                    <th>Stage</th>
+                    <th>Amount ($)</th>
+                    <th>Probability</th>
+                    <th>Weighted Value</th>
+                    <th>Close Target</th>
+                    <th>Owner</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var o in Model)
+                {
+                    <tr>
+                        <td class="fw-semibold">@o.OpportunityName</td>
+                        <td>@(o.Customer?.CustomerName ?? "—")</td>
+                        <td><span class="badge bg-light text-dark border">@o.Stage</span></td>
+                        <td class="fw-bold text-dark">$@o.Amount.ToString("N0")</td>
+                        <td>@o.Probability%</td>
+                        <td class="fw-semibold text-success">$@o.WeightedAmount.ToString("N0")</td>
+                        <td>@o.ExpectedCloseDate.ToString("yyyy-MM-dd")</td>
+                        <td>@(o.AssignedUser?.FullName ?? "Unassigned")</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</div>

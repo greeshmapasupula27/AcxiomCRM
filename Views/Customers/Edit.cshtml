@@ -1,0 +1,99 @@
+@model AcxiomCRM.Models.Customer
+@{
+    ViewData["Title"] = "Edit Customer";
+}
+
+<div class="row justify-content-center">
+    <div class="col-12 col-lg-8">
+        <div class="d-flex align-items-center mb-3">
+            <a asp-action="Index" class="btn btn-sm btn-outline-secondary me-2"><i class="bi bi-arrow-left"></i></a>
+            <h4 class="fw-bold mb-0">Edit Customer: @Model.CustomerName</h4>
+        </div>
+
+        <div class="crm-card p-4">
+            <form asp-action="Edit" method="post">
+                @Html.AntiForgeryToken()
+                <input type="hidden" asp-for="CustomerId" />
+                <div asp-validation-summary="ModelOnly" class="alert alert-danger" role="alert"></div>
+
+                <div class="row g-3">
+                    <div class="col-md-4">
+                        <label asp-for="CustomerCode" class="form-label fw-semibold">Customer Code</label>
+                        <input asp-for="CustomerCode" class="form-control" readonly />
+                    </div>
+
+                    <div class="col-md-8">
+                        <label asp-for="CustomerName" class="form-label fw-semibold">Customer Name <span class="text-danger">*</span></label>
+                        <input asp-for="CustomerName" class="form-control" />
+                        <span asp-validation-for="CustomerName" class="text-danger small"></span>
+                    </div>
+
+                    <div class="col-md-6">
+                        <label asp-for="Email" class="form-label fw-semibold">Corporate Email <span class="text-danger">*</span></label>
+                        <input asp-for="Email" class="form-control" />
+                        <span asp-validation-for="Email" class="text-danger small"></span>
+                    </div>
+
+                    <div class="col-md-6">
+                        <label asp-for="Phone" class="form-label fw-semibold">Phone Number <span class="text-danger">*</span></label>
+                        <input asp-for="Phone" class="form-control" maxlength="10" />
+                        <span asp-validation-for="Phone" class="text-danger small"></span>
+                    </div>
+
+                    <div class="col-md-6">
+                        <label asp-for="CompanyName" class="form-label fw-semibold">Company Name</label>
+                        <input asp-for="CompanyName" class="form-control" />
+                        <span asp-validation-for="CompanyName" class="text-danger small"></span>
+                    </div>
+
+                    <div class="col-md-6">
+                        <label asp-for="Status" class="form-label fw-semibold">Status</label>
+                        <select asp-for="Status" class="form-select">
+                            <option value="Active">Active</option>
+                            <option value="Prospect">Prospect</option>
+                            <option value="Inactive">Inactive</option>
+                        </select>
+                        <span asp-validation-for="Status" class="text-danger small"></span>
+                    </div>
+
+                    <div class="col-12">
+                        <label asp-for="Address" class="form-label fw-semibold">Address</label>
+                        <input asp-for="Address" class="form-control" />
+                        <span asp-validation-for="Address" class="text-danger small"></span>
+                    </div>
+
+                    <div class="col-md-6">
+                        <label asp-for="City" class="form-label fw-semibold">City</label>
+                        <input asp-for="City" class="form-control" />
+                        <span asp-validation-for="City" class="text-danger small"></span>
+                    </div>
+
+                    <div class="col-md-6">
+                        <label asp-for="State" class="form-label fw-semibold">State</label>
+                        <input asp-for="State" class="form-control" />
+                        <span asp-validation-for="State" class="text-danger small"></span>
+                    </div>
+
+                    <div class="col-12">
+                        <label asp-for="Notes" class="form-label fw-semibold">Account Notes</label>
+                        <textarea asp-for="Notes" class="form-control" rows="3"></textarea>
+                        <span asp-validation-for="Notes" class="text-danger small"></span>
+                    </div>
+                </div>
+
+                <hr class="my-4" />
+
+                <div class="d-flex justify-content-end gap-2">
+                    <a asp-action="Index" class="btn btn-outline-secondary">Cancel</a>
+                    <button type="submit" class="btn btn-primary px-4 fw-semibold">
+                        <i class="bi bi-save me-1"></i> Update Customer
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    @{await Html.RenderPartialAsync("_ValidationScriptsPartial");}
+}
